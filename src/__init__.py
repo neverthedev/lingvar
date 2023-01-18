@@ -1,7 +1,7 @@
 import os
 from flask import Flask, render_template
-from . import db
-from . import auth
+from . import db, auth, vocabulary
+
 
 def create_app(test_config=None):
     app = Flask(__name__, instance_relative_config=True)
@@ -23,12 +23,10 @@ def create_app(test_config=None):
     except OSError:
         pass
 
-    # a simple page that says hello
-    @app.route('/')
-    def homepage():
-        return render_template('index.html')
-
     db.init_app(app)
     app.register_blueprint(auth.bp)
+    app.register_blueprint(vocabulary.bp)
+
+    app.add_url_rule('/', endpoint='homepage')
 
     return app

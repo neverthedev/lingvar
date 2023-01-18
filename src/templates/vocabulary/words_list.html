@@ -1,0 +1,37 @@
+{% extends('base.html') %}
+
+{% block header %}
+  <h1>{% block title %}Words list{% endblock %}</h1>
+{% endblock %}
+
+{% block content %}
+  {% if words %}
+    <ul>
+      {% for word in words: %}
+        <li>
+          <span>{{ word['original'] }}</span> - <span>{{ word['translation'] }}<span>
+          <span>
+            <form action="{{ url_for('vocabulary.remove_word', word_id=word['id']) }}" method="POST">
+              <button class="remove-word" type="submit">Remove</button>
+            </form>
+          </span>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+    <form action="{{ url_for('vocabulary.create') }}" method="post">
+      <label for="original">Original</label>
+      <input name="original" id="title" value="{{ request.form['original'] }}" required>
+      <label for="translation">Translation</label>
+      <input name="translation" id="translation">{{ request.form['translation'] }}</input>
+      <input type="submit" value="Save">
+    </form>
+{% endblock %}
+
+{%block  script %}
+  <script type="text/javascript">
+    $(document).ready(function(){
+    })
+  </script>
+{% endblock %}

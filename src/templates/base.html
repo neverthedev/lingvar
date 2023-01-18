@@ -1,6 +1,7 @@
 <!doctype html>
 <title>{% block title %}{% endblock %} - Lingvar</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='stylesheets/application.css') }}">
+<script src="{{ url_for('static', filename='javascripts/jquery.min.js') }}"></script>
 <nav>
   <h1>Lingvar</h1>
   <ul>
@@ -22,3 +23,4 @@
   {% endfor %}
   {% block content %}{% endblock %}
 </section>
+{% block script %}{%endblock%}
