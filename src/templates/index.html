@@ -1,0 +1,10 @@
+{% extends('base.html') %}
+
+{% block header %}
+  <h1>{% block title %}Wellcome{% endblock %}</h1>
+{% endblock %}
+
+{% block content %}
+Hello, {{ g.user['username'] if g.user else 'user' }}!
+
+{% endblock %}

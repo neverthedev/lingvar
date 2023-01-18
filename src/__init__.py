@@ -1,6 +1,7 @@
 import os
-from flask import Flask
-
+from flask import Flask, render_template
+from . import db
+from . import auth
 
 def create_app(test_config=None):
     app = Flask(__name__, instance_relative_config=True)
@@ -23,11 +24,11 @@ def create_app(test_config=None):
         pass
 
     # a simple page that says hello
-    @app.route('/hel')
-    def hello():
-        return 'Hello, World!'
+    @app.route('/')
+    def homepage():
+        return render_template('index.html')
 
-    from . import db
     db.init_app(app)
+    app.register_blueprint(auth.bp)
 
     return app
