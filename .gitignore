@@ -1,6 +1,7 @@
 venv/
 
 *.pyc
+*,cover
 __pycache__/
 
 instance/

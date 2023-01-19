@@ -7,11 +7,11 @@ def create_app(test_config=None):
     app = Flask(__name__, instance_relative_config=True)
     app.config.from_mapping(
         SECRET_KEY='bd5a54fb6fdeffbefd8273f91dfb8d3a332ab41572b35bf761dcf7cfbc31294b',
-        DATABASE=os.path.join(app.instance_path, 'lingvar.sqlite'),
+        DATABASE=os.path.join(app.instance_path, 'lingvar.db'),
     )
 
     if test_config is None:
-        # load the instance config, if it exists, when not testing
+        # load the instance config, if it exists, when not testin
         app.config.from_pyfile('config.py', silent=True)
     else:
         # load the test config if passed in
@@ -28,5 +28,9 @@ def create_app(test_config=None):
     app.register_blueprint(vocabulary.bp)
 
     app.add_url_rule('/', endpoint='homepage')
+
+    @app.route('/hello')
+    def hello():
+        return 'Hello, world'
 
     return app

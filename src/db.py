@@ -1,32 +1,42 @@
-import sqlite3
+from sqlalchemy import create_engine, MetaData
+from sqlalchemy.orm import sessionmaker, scoped_session
 
 import click
 from flask import current_app, g
 
 
 def init_db():
-    db = get_db()
+    with current_app.app_context():
+        from src.adapters.orm import user_table
+        get_metadata().create_all(bind=get_engine())
 
-    with current_app.open_resource('schema.sql') as f:
-        db.executescript(f.read().decode('utf8'))
+def get_metadata():
+    if 'metadata' not in g:
+        g.metadata = MetaData()
 
+    return g.metadata
+
+def get_engine():
+    if 'engine' not in g:
+        g.engine = create_engine(
+            f"sqlite:///{current_app.config['DATABASE']}", echo=True)
+        print(f"Database url: {current_app.config['DATABASE']}")
+
+    return g.engine
 
 def get_db():
     if 'db' not in g:
-        g.db = sqlite3.connect(
-            current_app.config['DATABASE'],
-            detect_types=sqlite3.PARSE_DECLTYPES
-        )
-        g.db.row_factory = sqlite3.Row
-
+        g.db = scoped_session(sessionmaker(autocommit=False,
+                                           autoflush=False,
+                                           bind=get_engine()))
     return g.db
 
 
-def close_db(e=None):
+def close_db(exception=None):
     db = g.pop('db', None)
 
     if db is not None:
-        db.close()
+        db.remove()
 
 
 def init_app(app):
