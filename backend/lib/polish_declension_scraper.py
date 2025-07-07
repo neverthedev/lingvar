@@ -3,6 +3,29 @@ from bs4 import BeautifulSoup
 from typing import Dict, Optional
 import re
 from dataclasses import dataclass
+from database import Noun, SessionLocal
+import json
+from time import sleep
+
+words = [
+    "kobieta", "mężczyzna", "chłopiec", "dziewczyna",
+    "rodzina", "przyjaciel", "przyjaciółka", "nauczyciel", "kot", "pies",
+    "dom", "samochód", "książka", "komputer", "telefon", "stół", "dziecko",
+    "miasto", "wieś", "szkoła", "praca", "ogród", "drzewo", "kwiat",
+    "miesiąc", "miejsce", "czas", "pieniądze", "jedzenie", "miłość", "klucz",
+    "laptop", "rower", "film", "sport", "zdrowie", "tata", "mama",
+    "brat", "siostra", "dziadek", "babcia", "słonce", "księżyc", "mleko",
+    "chleb", "woda", "herbata", "kawa", "ciasto", "owoce", "warzywa",
+    "centrum", "sklep", "restauracja", "muzeum", "imię", "nazwisko",
+    "adres", "telefon", "email", "internet", "las", "morze", "krem",
+    "poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota",
+    "niedziela", "kościół", "szpital", "apteka", "stół", "krzesło", "łóżko",
+    "okno", "drzwi", "podłoga", "ściana", "sufit", "kuchnia", "łazienka",
+    "pralka", "lodówka", "mikrofalówka", "zmywarka", "bursztyn", "srebro",
+    "garnek", "patelnia", "sztućce", "talerz", "kubek", "szklanka", "artysta",
+    "pracownik", "student", "uczeń", "sportowiec", "muzyk", "pisarz", "inżynier",
+    "lekarz", "naukowiec", "programista", "kucharz", "sprzedawca", "fachowiec",
+    "architekt", "projektant", "dziennikarz", "fotograf", "gospodyni", "kerowca", "ludzie"]
 
 @dataclass
 class DeclensionResult:
@@ -114,7 +137,7 @@ class PolishDeclensionScraper:
             cells = row.find_all(['td', 'th'])
             if len(cells) >= 2:
                 case_name = cells[0].get_text().strip().lower()
-                case_value = cells[2].get_text().strip()
+                case_value = cells[1].get_text().strip() # first colunm is for singular form
 
                 # Clean up the case name and value
                 case_name = re.sub(r'[^\w\s]', '', case_name)
@@ -135,14 +158,14 @@ class PolishDeclensionScraper:
 
         return DeclensionResult(**declension_data)
 
-    def get_ludzie_declension(self) -> Optional[DeclensionResult]:
+    def get_word_declension(self, word: str) -> Optional[DeclensionResult]:
         """
         Get declension for the word 'ludzie' from the specific URL
 
         Returns:
             DeclensionResult object or None if scraping fails
         """
-        url = "https://odmiana.net/odmiana-przez-przypadki-rzeczownika-brat"
+        url = f"https://odmiana.net/odmiana-przez-przypadki-rzeczownika-{word}"
         return self.scrape_declension(url)
 
     def format_declension_result(self, result: DeclensionResult) -> Dict[str, str]:
@@ -156,23 +179,31 @@ class PolishDeclensionScraper:
             Dictionary with Polish case names as keys
         """
         return {
-            "Mianownik": result.mianownik,
-            "Dopełniacz": result.dopelniacz,
-            "Celownik": result.celownik,
-            "Biernik": result.biernik,
-            "Narzędnik": result.narzednik,
-            "Miejscownik": result.miejscownik,
-            "Wołacz": result.wolacz
+            "mianownik": result.mianownik,
+            "dopełniacz": result.dopelniacz,
+            "celownik": result.celownik,
+            "biernik": result.biernik,
+            "narzędnik": result.narzednik,
+            "miejscownik": result.miejscownik,
+            "wołacz": result.wolacz
         }
 
 # Example usage
 if __name__ == "__main__":
     scraper = PolishDeclensionScraper()
-    result = scraper.get_ludzie_declension()
+    db = SessionLocal()
+    try:
+        for word in words:
+            result = scraper.get_word_declension(word)
+            if result:
+                formatted = scraper.format_declension_result(result)
+                noun = Noun(word=word, cases_pojed=formatted, cases_mnoga={}, cases_menska={})
+                db.add(noun)
+                db.commit()
+                print(f"Saved: {word} -> {json.dumps(formatted, ensure_ascii=False)}")
+            else:
+                print(f"Failed to scrape declension data for: {word}")
 
-    if result:
-        formatted = scraper.format_declension_result(result)
-        for case, form in formatted.items():
-            print(f"{case} - {form}")
-    else:
-        print("Failed to scrape declension data")
+            sleep(2)
+    finally:
+        db.close()

@@ -1,4 +1,6 @@
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean
+from sqlalchemy.dialects.postgresql import JSONB
+
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql import func
@@ -35,6 +37,17 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True)
     is_superuser = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+class Noun(Base):
+    __tablename__ = "nouns"
+
+    id = Column(Integer, primary_key=True, index=True)
+    word = Column(String(100), nullable=False, index=True)
+    cases_pojed = Column(JSONB, nullable=False)
+    cases_mnoga = Column(JSONB, nullable=False)
+    cases_menska = Column(JSONB, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
