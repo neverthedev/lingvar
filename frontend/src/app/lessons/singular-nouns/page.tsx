@@ -350,7 +350,7 @@ export default function SingularNounsLesson() {
         </div>
 
         {/* Interactive Exercise Table */}
-        <div className="bg-white rounded-lg shadow-lg overflow-hidden">
+        <div className="bg-white rounded-lg shadow-lg">
           <div className="p-4 border-b bg-gray-50">
             <h3 className="text-lg font-semibold text-gray-900">Interactive Exercise</h3>
             <p className="text-sm text-gray-600 mt-1">
@@ -358,16 +358,16 @@ export default function SingularNounsLesson() {
             </p>
           </div>
 
-          <div className="overflow-x-auto max-h-96 overflow-y-auto">
+          <div className="relative">
             <table className="w-full">
               {/* Fixed Header */}
-              <thead className="bg-gray-50 sticky top-0 z-10">
+              <thead className="bg-gray-50 sticky top-0 z-50 shadow-sm">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky left-0 bg-gray-50 z-20 border-r min-w-[120px]">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky left-0 bg-gray-50 z-50 border-r min-w-[120px] shadow-sm">
                     Word
                   </th>
                   {cases.map((case_) => (
-                    <th key={case_.key} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[150px]">
+                    <th key={case_.key} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[150px] bg-gray-50">
                       {case_.name}
                     </th>
                   ))}
