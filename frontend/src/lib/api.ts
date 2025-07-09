@@ -9,7 +9,8 @@ export const API_ENDPOINTS = {
   users: `${API_BASE_URL}/users`,
   health: `${API_BASE_URL}/health`,
   dbTest: `${API_BASE_URL}/api/db-test`,
-  declensionLudzie: `${API_BASE_URL}/api/declension/ludzie`
+  declensionLudzie: `${API_BASE_URL}/api/declension/ludzie`,
+  nounsSingle: `${API_BASE_URL}/api/nouns/single`
 }
 
 // Types based on the API documentation
