@@ -2,12 +2,13 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from datetime import timedelta
 from contextlib import asynccontextmanager
 import uvicorn
 import os
 
-from database import get_db, create_tables, User as DBUser, test_connection
+from database import get_db, create_tables, User as DBUser, test_connection, Noun
 from auth import authenticate_user, create_access_token, get_current_active_user, get_password_hash, ACCESS_TOKEN_EXPIRE_MINUTES
 from models import UserCreate, UserResponse, Token
 from lib.polish_declension_scraper import PolishDeclensionScraper
@@ -148,6 +149,27 @@ async def get_ludzie_declension(current_user: DBUser = Depends(get_current_activ
         )
 
     return scraper.format_declension_result(result)
+
+# Endpoint to get 20 random nouns with their single cases (flat JSON)
+@app.get("/api/nouns/single", tags=["nouns"])
+async def get_nouns_page(
+    current_user: DBUser = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    nouns = db.query(Noun).order_by(func.random()).limit(20).all()
+    # Define all possible cases (adjust as needed for your language)
+    all_cases = [ "mianownik", "dopełniacz", "celownik", "biernik", "narzędnik", "miejscownik", "wołacz" ]
+    result = []
+    for noun in nouns:
+        # Start with all cases as empty string
+        flat = {"id": noun.id, "word": noun.word}
+        for case in all_cases:
+            flat[case] = ""
+        # Merge actual cases_pojed values if present
+        if isinstance(noun.cases_pojed, dict):
+            flat.update(noun.cases_pojed)
+        result.append(flat)
+    return result
 
 if __name__ == "__main__":
     uvicorn.run(
