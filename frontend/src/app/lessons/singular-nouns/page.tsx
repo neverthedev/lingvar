@@ -2,8 +2,7 @@
 
 import { useAuth } from '@/contexts/AuthContext'
 import { AuthService, API_ENDPOINTS } from '@/lib/api'
-import { LessonLayout, Typography, Button, Icon, LoadingSpinner, InteractiveLessonTable } from '@/components'
-import Link from 'next/link'
+import { LessonLayout, Typography, Icon, InteractiveLessonTable, LessonNavigation } from '@/components'
 import { useRouter } from 'next/navigation'
 import { useState, useEffect } from 'react'
 
@@ -74,23 +73,14 @@ export default function SingularNounsLesson() {
     }
   }, [isAuthenticated, isLoading, router])
 
-  return (
-    <LessonLayout loading={isLoading || loading} error={error}>
-      {/* Breadcrumb */}
-      <nav className="mb-8">
-        <ol className="flex items-center space-x-2 text-sm text-gray-500">
-          <li>
-            <Link href="/lessons" className="hover:text-indigo-600">
-              Lessons
-            </Link>
-          </li>
-          <li>
-            <Icon name="arrow-right" size="sm" />
-          </li>
-          <li className="text-gray-900">Singular Nouns</li>
-        </ol>
-      </nav>
+  // Breadcrumb configuration
+  const breadcrumbs = [
+    { href: '/lessons', label: 'Lessons' },
+    { label: 'Singular Nouns', current: true }
+  ]
 
+  return (
+    <LessonLayout loading={isLoading || loading} error={error} breadcrumbs={breadcrumbs}>
       {/* Lesson Header */}
       <div className="flex items-center justify-center mb-6">
         <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mr-4">
@@ -108,19 +98,10 @@ export default function SingularNounsLesson() {
         description="Click on any case cell to fill in the correct form. You have 3 attempts per cell."
       />
 
-      {/* Navigation */}
-      <div className="mt-8 flex justify-between">
-        <Link href="/lessons">
-          <Button variant="secondary" size="md">
-            ← Back to Lessons
-          </Button>
-        </Link>
-        <Link href="/lessons/plural-nouns">
-          <Button variant="primary" size="md">
-            Next: Plural Nouns →
-          </Button>
-        </Link>
-      </div>
+      <LessonNavigation
+        nextLesson={{ href: '/lessons/plural-nouns', title: 'Plural Nouns' }}
+        backToLessons={{ href: '/lessons', title: 'Back to Lessons' }}
+      />
     </LessonLayout>
   )
 }

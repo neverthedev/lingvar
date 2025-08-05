@@ -15,3 +15,6 @@ export { LessonCard } from './LessonCard'
 export type { LessonCardProps } from './LessonCard'
 
 export { LessonSection } from './LessonSection'
+
+export { LessonNavigation } from './LessonNavigation'
+export type { LessonNavigationProps } from './LessonNavigation'

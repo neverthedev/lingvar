@@ -1,29 +1,19 @@
 'use client'
 
 import { useAuth } from '@/contexts/AuthContext'
-import { LessonLayout, Typography, Button, Icon, LoadingSpinner, LessonSection } from '@/components'
-import Link from 'next/link'
+import { LessonLayout, Typography, Icon, LessonSection, LessonNavigation } from '@/components'
 
 export default function PluralNounsLesson() {
   const { isLoading } = useAuth()
 
-  return (
-    <LessonLayout loading={isLoading}>
-      {/* Breadcrumb */}
-      <nav className="mb-8">
-        <ol className="flex items-center space-x-2 text-sm text-gray-500">
-          <li>
-            <Link href="/lessons" className="hover:text-indigo-600">
-              Lessons
-            </Link>
-          </li>
-          <li>
-            <Icon name="arrow-right" size="sm" />
-          </li>
-          <li className="text-gray-900">Plural Nouns</li>
-        </ol>
-      </nav>
+  // Breadcrumb configuration
+  const breadcrumbs = [
+    { href: '/lessons', label: 'Lessons' },
+    { label: 'Plural Nouns', current: true }
+  ]
 
+  return (
+    <LessonLayout loading={isLoading} breadcrumbs={breadcrumbs}>
       {/* Lesson Header */}
       <div className="text-center mb-12">
         <div className="w-20 h-20 bg-green-100 rounded-lg flex items-center justify-center mx-auto mb-4">
@@ -42,19 +32,10 @@ export default function PluralNounsLesson() {
 
       </div>
 
-      {/* Navigation */}
-      <div className="mt-8 flex justify-between">
-        <Link href="/lessons/singular-nouns">
-          <Button variant="secondary" size="md">
-            ← Previous: Singular Nouns
-          </Button>
-        </Link>
-        <Link href="/lessons">
-          <Button variant="primary" size="md">
-            Back to Lessons
-          </Button>
-        </Link>
-      </div>
+      <LessonNavigation
+        previousLesson={{ href: '/lessons/singular-nouns', title: 'Singular Nouns' }}
+        backToLessons={{ href: '/lessons', title: 'Back to Lessons' }}
+      />
     </LessonLayout>
   )
 }

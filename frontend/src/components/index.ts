@@ -12,7 +12,8 @@ export {
   Breadcrumb,
   UserMenu,
   LessonCard,
-  LessonSection
+  LessonSection,
+  LessonNavigation
 } from './molecules'
 
 // Organisms - Complex components
