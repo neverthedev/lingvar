@@ -24,19 +24,9 @@ export default function SingularNounsLesson() {
     wołacz: string
   }
 
-  interface CellState {
-    isEditing?: boolean
-    isCorrect?: boolean
-    showAnswer?: boolean
-    answer?: string
-  }
-
   const [nouns, setNouns] = useState<Noun[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [cellStates, setCellStates] = useState<Record<string, CellState>>({})
-  const [inputValues, setInputValues] = useState<Record<string, string>>({})
-  const [attempts, setAttempts] = useState<Record<string, number>>({})
 
   // Cases configuration
   const cases = [
@@ -83,115 +73,6 @@ export default function SingularNounsLesson() {
       setLoading(false)
     }
   }, [isAuthenticated, isLoading, router])
-
-  // Handle cell click
-  const handleCellClick = (nounId: number, caseKey: string) => {
-    const cellKey = `${nounId}-${caseKey}`
-
-    // Don't allow clicking on cells that already have answers
-    if (cellStates[cellKey]?.showAnswer) {
-      return
-    }
-
-    // Cancel all other editing cells first
-    setCellStates(prev => {
-      const newStates = { ...prev }
-      Object.keys(newStates).forEach(key => {
-        if (key !== cellKey && newStates[key]?.isEditing) {
-          newStates[key] = { ...newStates[key], isEditing: false }
-        }
-      })
-      return newStates
-    })
-
-    // Clear input values for other cells
-    setInputValues(prev => {
-      const newValues = { ...prev }
-      Object.keys(newValues).forEach(key => {
-        if (key !== cellKey) {
-          delete newValues[key]
-        }
-      })
-      return newValues
-    })
-
-    // Set the clicked cell to editing mode
-    setCellStates(prev => ({
-      ...prev,
-      [cellKey]: { ...prev[cellKey], isEditing: true }
-    }))
-  }
-
-  // Handle input change
-  const handleInputChange = (nounId: number, caseKey: string, value: string) => {
-    const cellKey = `${nounId}-${caseKey}`
-    setInputValues(prev => ({
-      ...prev,
-      [cellKey]: value
-    }))
-  }
-
-  // Handle OK button click
-  const handleOk = (item: any, caseKey: string) => {
-    const cellKey = `${item.id}-${caseKey}`
-    const inputValue = inputValues[cellKey]?.trim().toLowerCase()
-    const correctValue = item[caseKey as keyof typeof item]?.toString().toLowerCase()
-
-    if (inputValue === correctValue) {
-      // Correct answer
-      setCellStates(prev => ({
-        ...prev,
-        [cellKey]: {
-          isEditing: false,
-          isCorrect: true,
-          showAnswer: true,
-          answer: item[caseKey as keyof typeof item]?.toString()
-        }
-      }))
-      setInputValues(prev => ({ ...prev, [cellKey]: '' }))
-      setAttempts(prev => ({ ...prev, [cellKey]: 0 }))
-    } else {
-      // Wrong answer
-      const currentAttempts = attempts[cellKey] || 0
-      const newAttempts = currentAttempts + 1
-
-      if (newAttempts >= 3) {
-        // Show correct answer after 3 attempts
-        setCellStates(prev => ({
-          ...prev,
-          [cellKey]: {
-            isEditing: false,
-            isCorrect: false,
-            showAnswer: true,
-            answer: item[caseKey as keyof typeof item]?.toString()
-          }
-        }))
-        setInputValues(prev => ({ ...prev, [cellKey]: '' }))
-        setAttempts(prev => ({ ...prev, [cellKey]: 0 }))
-      } else {
-        // Allow another attempt
-        setAttempts(prev => ({ ...prev, [cellKey]: newAttempts }))
-        setInputValues(prev => ({ ...prev, [cellKey]: '' }))
-      }
-    }
-  }
-
-  // Handle Cancel button click
-  const handleCancel = (nounId: number, caseKey: string) => {
-    // Cancel all editing cells (like clicking on another cell)
-    setCellStates(prev => {
-      const newStates = { ...prev }
-      Object.keys(newStates).forEach(key => {
-        if (newStates[key]?.isEditing) {
-          newStates[key] = { ...newStates[key], isEditing: false }
-        }
-      })
-      return newStates
-    })
-
-    // Clear all input values
-    setInputValues({})
-  }
 
   if (isLoading || loading) {
     return <LoadingSpinner size="lg" />
@@ -242,14 +123,7 @@ export default function SingularNounsLesson() {
         <InteractiveLessonTable
           data={nouns}
           cases={cases}
-          cellStates={cellStates}
-          inputValues={inputValues}
-          attempts={attempts}
-          onCellClick={handleCellClick}
-          onInputChange={handleInputChange}
-          onOk={handleOk}
-          onCancel={handleCancel}
-          title="Interactive Exercise"
+          title="Singular Nouns Declension"
           description="Click on any case cell to fill in the correct form. You have 3 attempts per cell."
         />
 

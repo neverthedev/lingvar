@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Typography, Button, Icon } from '../atoms'
 
 interface CaseColumn {
@@ -22,13 +22,6 @@ interface CellState {
 interface InteractiveLessonTableProps {
   data: TableData[]
   cases: CaseColumn[]
-  cellStates: Record<string, CellState>
-  inputValues: Record<string, string>
-  attempts: Record<string, number>
-  onCellClick: (id: number, caseKey: string) => void
-  onInputChange: (id: number, caseKey: string, value: string) => void
-  onOk: (item: TableData, caseKey: string) => void
-  onCancel: (id: number, caseKey: string) => void
   title?: string
   description?: string
 }
@@ -36,16 +29,121 @@ interface InteractiveLessonTableProps {
 export const InteractiveLessonTable: React.FC<InteractiveLessonTableProps> = ({
   data,
   cases,
-  cellStates,
-  inputValues,
-  attempts,
-  onCellClick,
-  onInputChange,
-  onOk,
-  onCancel,
   title = "Interactive Exercise",
   description = "Click on any case cell to fill in the correct form. You have 3 attempts per cell."
 }) => {
+  const [cellStates, setCellStates] = useState<Record<string, CellState>>({})
+  const [inputValues, setInputValues] = useState<Record<string, string>>({})
+  const [attempts, setAttempts] = useState<Record<string, number>>({})
+
+  // Handle cell click
+  const handleCellClick = (itemId: number, caseKey: string) => {
+    const cellKey = `${itemId}-${caseKey}`
+
+    // Don't allow clicking on cells that already have answers
+    if (cellStates[cellKey]?.showAnswer) {
+      return
+    }
+
+    // Cancel all other editing cells first
+    setCellStates(prev => {
+      const newStates = { ...prev }
+      Object.keys(newStates).forEach(key => {
+        if (key !== cellKey && newStates[key]?.isEditing) {
+          newStates[key] = { ...newStates[key], isEditing: false }
+        }
+      })
+      return newStates
+    })
+
+    // Clear input values for other cells
+    setInputValues(prev => {
+      const newValues = { ...prev }
+      Object.keys(newValues).forEach(key => {
+        if (key !== cellKey) {
+          delete newValues[key]
+        }
+      })
+      return newValues
+    })
+
+    // Set the clicked cell to editing mode
+    setCellStates(prev => ({
+      ...prev,
+      [cellKey]: { ...prev[cellKey], isEditing: true }
+    }))
+  }
+
+  // Handle input change
+  const handleInputChange = (itemId: number, caseKey: string, value: string) => {
+    const cellKey = `${itemId}-${caseKey}`
+    setInputValues(prev => ({
+      ...prev,
+      [cellKey]: value
+    }))
+  }
+
+  // Handle OK button click
+  const handleOk = (item: TableData, caseKey: string) => {
+    const cellKey = `${item.id}-${caseKey}`
+    const inputValue = inputValues[cellKey]?.trim().toLowerCase()
+    const correctValue = item[caseKey as keyof typeof item]?.toString().toLowerCase()
+
+    if (inputValue === correctValue) {
+      // Correct answer
+      setCellStates(prev => ({
+        ...prev,
+        [cellKey]: {
+          isEditing: false,
+          isCorrect: true,
+          showAnswer: true,
+          answer: item[caseKey as keyof typeof item]?.toString()
+        }
+      }))
+      setInputValues(prev => ({ ...prev, [cellKey]: '' }))
+      setAttempts(prev => ({ ...prev, [cellKey]: 0 }))
+    } else {
+      // Wrong answer
+      const currentAttempts = attempts[cellKey] || 0
+      const newAttempts = currentAttempts + 1
+
+      if (newAttempts >= 3) {
+        // Show correct answer after 3 attempts
+        setCellStates(prev => ({
+          ...prev,
+          [cellKey]: {
+            isEditing: false,
+            isCorrect: false,
+            showAnswer: true,
+            answer: item[caseKey as keyof typeof item]?.toString()
+          }
+        }))
+        setInputValues(prev => ({ ...prev, [cellKey]: '' }))
+        setAttempts(prev => ({ ...prev, [cellKey]: 0 }))
+      } else {
+        // Allow another attempt
+        setAttempts(prev => ({ ...prev, [cellKey]: newAttempts }))
+        setInputValues(prev => ({ ...prev, [cellKey]: '' }))
+      }
+    }
+  }
+
+  // Handle Cancel button click
+  const handleCancel = (itemId: number, caseKey: string) => {
+    // Cancel all editing cells
+    setCellStates(prev => {
+      const newStates = { ...prev }
+      Object.keys(newStates).forEach(key => {
+        if (newStates[key]?.isEditing) {
+          newStates[key] = { ...newStates[key], isEditing: false }
+        }
+      })
+      return newStates
+    })
+
+    // Clear all input values
+    setInputValues({})
+  }
   const getCellContent = (item: TableData, caseKey: string) => {
     const cellKey = `${item.id}-${caseKey}`
     const cellState = cellStates[cellKey]
@@ -58,14 +156,14 @@ export const InteractiveLessonTable: React.FC<InteractiveLessonTableProps> = ({
           <input
             type="text"
             value={inputValue}
-            onChange={(e) => onInputChange(item.id, caseKey, e.target.value)}
+            onChange={(e) => handleInputChange(item.id, caseKey, e.target.value)}
             className="flex-1 px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500 mr-1"
             placeholder="Enter word..."
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
-                onOk(item, caseKey)
+                handleOk(item, caseKey)
               } else if (e.key === 'Escape') {
-                onCancel(item.id, caseKey)
+                handleCancel(item.id, caseKey)
               }
             }}
             autoFocus
@@ -74,7 +172,7 @@ export const InteractiveLessonTable: React.FC<InteractiveLessonTableProps> = ({
             <Button
               onClick={(e) => {
                 e.stopPropagation()
-                onOk(item, caseKey)
+                handleOk(item, caseKey)
               }}
               variant="ghost"
               size="sm"
@@ -86,7 +184,7 @@ export const InteractiveLessonTable: React.FC<InteractiveLessonTableProps> = ({
             <Button
               onClick={(e) => {
                 e.stopPropagation()
-                onCancel(item.id, caseKey)
+                handleCancel(item.id, caseKey)
               }}
               variant="ghost"
               size="sm"
@@ -174,7 +272,7 @@ export const InteractiveLessonTable: React.FC<InteractiveLessonTableProps> = ({
                   <td
                     key={`${item.id}-${case_.key}`}
                     className={getCellClass(item, case_.key)}
-                    onClick={() => onCellClick(item.id, case_.key)}
+                    onClick={() => handleCellClick(item.id, case_.key)}
                   >
                     {getCellContent(item, case_.key)}
                   </td>
