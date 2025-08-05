@@ -74,73 +74,53 @@ export default function SingularNounsLesson() {
     }
   }, [isAuthenticated, isLoading, router])
 
-  if (isLoading || loading) {
-    return <LoadingSpinner size="lg" />
-  } else if (!isAuthenticated) {
-    // Redirect to login if not authenticated
-    router.push('/login')
-    return null
-  }
-
-  if (error) {
-    return (
-      <LessonLayout>
-        <div className="text-center">
-          <Typography variant="h2" className="text-red-600">{error}</Typography>
-        </div>
-      </LessonLayout>
-    )
-  }
-
   return (
-    <LessonLayout>
-      <main className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
-        {/* Breadcrumb */}
-        <nav className="mb-8">
-          <ol className="flex items-center space-x-2 text-sm text-gray-500">
-            <li>
-              <Link href="/lessons" className="hover:text-indigo-600">
-                Lessons
-              </Link>
-            </li>
-            <li>
-              <Icon name="arrow-right" size="sm" />
-            </li>
-            <li className="text-gray-900">Singular Nouns</li>
-          </ol>
-        </nav>
+    <LessonLayout loading={isLoading || loading} error={error}>
+      {/* Breadcrumb */}
+      <nav className="mb-8">
+        <ol className="flex items-center space-x-2 text-sm text-gray-500">
+          <li>
+            <Link href="/lessons" className="hover:text-indigo-600">
+              Lessons
+            </Link>
+          </li>
+          <li>
+            <Icon name="arrow-right" size="sm" />
+          </li>
+          <li className="text-gray-900">Singular Nouns</li>
+        </ol>
+      </nav>
 
-        {/* Lesson Header */}
-        <div className="flex items-center justify-center mb-6">
-          <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mr-4">
-            <Icon name="document" size="md" className="text-blue-600" />
-          </div>
-          <Typography variant="h1" className="text-3xl font-extrabold text-gray-900">
-            Singular Nouns Exercise
-          </Typography>
+      {/* Lesson Header */}
+      <div className="flex items-center justify-center mb-6">
+        <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mr-4">
+          <Icon name="document" size="md" className="text-blue-600" />
         </div>
+        <Typography variant="h1" className="text-3xl font-extrabold text-gray-900">
+          Singular Nouns Exercise
+        </Typography>
+      </div>
 
-        <InteractiveLessonTable
-          data={nouns}
-          cases={cases}
-          title="Singular Nouns Declension"
-          description="Click on any case cell to fill in the correct form. You have 3 attempts per cell."
-        />
+      <InteractiveLessonTable
+        data={nouns}
+        cases={cases}
+        title="Singular Nouns Declension"
+        description="Click on any case cell to fill in the correct form. You have 3 attempts per cell."
+      />
 
-        {/* Navigation */}
-        <div className="mt-8 flex justify-between">
-          <Link href="/lessons">
-            <Button variant="secondary" size="md">
-              ← Back to Lessons
-            </Button>
-          </Link>
-          <Link href="/lessons/plural-nouns">
-            <Button variant="primary" size="md">
-              Next: Plural Nouns →
-            </Button>
-          </Link>
-        </div>
-      </main>
+      {/* Navigation */}
+      <div className="mt-8 flex justify-between">
+        <Link href="/lessons">
+          <Button variant="secondary" size="md">
+            ← Back to Lessons
+          </Button>
+        </Link>
+        <Link href="/lessons/plural-nouns">
+          <Button variant="primary" size="md">
+            Next: Plural Nouns →
+          </Button>
+        </Link>
+      </div>
     </LessonLayout>
   )
 }
