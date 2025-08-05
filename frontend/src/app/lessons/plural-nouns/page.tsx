@@ -33,7 +33,7 @@ export default function PluralNounsLesson() {
       </div>
 
       <LessonNavigation
-        previousLesson={{ href: '/lessons/singular-nouns', title: 'Singular Nouns' }}
+        previousLesson={{ href: '/lessons/pronouns', title: 'Pronouns' }}
         backToLessons={{ href: '/lessons', title: 'Back to Lessons' }}
       />
     </LessonLayout>

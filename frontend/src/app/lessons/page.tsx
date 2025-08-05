@@ -14,6 +14,14 @@ const lessonsData = [
     duration: '15 min'
   },
   {
+    id: 'pronouns',
+    title: 'Pronouns',
+    description: 'Learn about different types of pronouns and their usage in sentences.',
+    href: '/lessons/pronouns',
+    difficulty: 'Beginner' as const,
+    duration: '20 min'
+  },
+  {
     id: 'plural-nouns',
     title: 'Plural Nouns',
     description: 'Master the rules of plural noun formation and practice with various examples and exceptions.',

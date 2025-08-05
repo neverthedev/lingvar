@@ -6,12 +6,12 @@ import { LessonLayout, Typography, Icon, InteractiveLessonTable, LessonNavigatio
 import { useRouter } from 'next/navigation'
 import { useState, useEffect } from 'react'
 
-export default function SingularNounsLesson() {
+export default function PronounsLesson() {
   const { isAuthenticated, isLoading } = useAuth()
   const router = useRouter()
 
-  // Type definitions
-  interface Noun {
+  // Type definitions for pronouns
+  interface Pronoun {
     id: number
     word: string
     mianownik: string
@@ -23,7 +23,7 @@ export default function SingularNounsLesson() {
     wołacz: string
   }
 
-  const [nouns, setNouns] = useState<Noun[]>([])
+  const [pronouns, setPronouns] = useState<Pronoun[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -35,12 +35,19 @@ export default function SingularNounsLesson() {
     { key: 'narzędnik', name: 'Narzędnik' },
     { key: 'miejscownik', name: 'Miejscownik' },
     { key: 'wołacz', name: 'Wołacz' }
-  ]  // Fetch nouns from API
+  ]
 
+  // Breadcrumb configuration
+  const breadcrumbs = [
+    { href: '/lessons', label: 'Lessons' },
+    { label: 'Pronouns', current: true }
+  ]
+
+  // Fetch pronouns from API
   useEffect(() => {
-    const fetchNouns = async () => {
+    const fetchPronouns = async () => {
       try {
-        const response = await fetch(API_ENDPOINTS.nounsSingle, {
+        const response = await fetch(API_ENDPOINTS.pronouns, {
           method: 'GET',
           headers: AuthService.getAuthHeaders()
         })
@@ -52,14 +59,14 @@ export default function SingularNounsLesson() {
             router.push('/login')
             return
           }
-          throw new Error('Failed to fetch nouns')
+          throw new Error('Failed to fetch pronouns')
         }
 
         const data = await response.json()
-        setNouns(data)
+        setPronouns(data)
       } catch (err) {
-        console.error('Error fetching nouns:', err)
-        setError('Failed to load nouns. Please try again.')
+        console.error('Error fetching pronouns:', err)
+        setError('Failed to load pronouns. Please try again.')
       } finally {
         setLoading(false)
       }
@@ -67,39 +74,34 @@ export default function SingularNounsLesson() {
 
     // Only fetch if user is authenticated
     if (isAuthenticated && !isLoading) {
-      fetchNouns()
+      fetchPronouns()
     } else if (!isLoading && !isAuthenticated) {
       setLoading(false)
     }
   }, [isAuthenticated, isLoading, router])
 
-  // Breadcrumb configuration
-  const breadcrumbs = [
-    { href: '/lessons', label: 'Lessons' },
-    { label: 'Singular Nouns', current: true }
-  ]
-
   return (
     <LessonLayout loading={isLoading || loading} error={error} breadcrumbs={breadcrumbs}>
       {/* Lesson Header */}
       <div className="flex items-center justify-center mb-6">
-        <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mr-4">
-          <Icon name="document" size="md" className="text-blue-600" />
+        <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mr-4">
+          <Icon name="user" size="md" className="text-purple-600" />
         </div>
         <Typography variant="h1" className="text-3xl font-extrabold text-gray-900">
-          Singular Nouns Exercise
+          Pronouns Exercise
         </Typography>
       </div>
 
       <InteractiveLessonTable
-        data={nouns}
+        data={pronouns}
         cases={cases}
-        title="Singular Nouns Declension"
+        title="Pronouns Declension"
         description="Click on any case cell to fill in the correct form. You have 3 attempts per cell."
       />
 
       <LessonNavigation
-        nextLesson={{ href: '/lessons/pronouns', title: 'Pronouns' }}
+        previousLesson={{ href: '/lessons/singular-nouns', title: 'Singular Nouns' }}
+        nextLesson={{ href: '/lessons/plural-nouns', title: 'Plural Nouns' }}
         backToLessons={{ href: '/lessons', title: 'Back to Lessons' }}
       />
     </LessonLayout>
