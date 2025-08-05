@@ -2,6 +2,7 @@
 
 import { useAuth } from '@/contexts/AuthContext'
 import Navigation from '@/components/Navigation'
+import LessonLoading from '@/components/LessonLoading'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 
@@ -9,23 +10,12 @@ export default function LessonsPage() {
   const { isAuthenticated, isLoading } = useAuth()
   const router = useRouter()
 
-  // Redirect to login if not authenticated
-  if (!isLoading && !isAuthenticated) {
+  if (isLoading) {
+    return <LessonLoading />
+  } else if (!isAuthenticated) {
+    // Redirect to login if not authenticated
     router.push('/login')
     return null
-  }
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gray-50">
-        <Navigation />
-        <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
-          <div className="text-center">
-            <div className="animate-pulse bg-gray-200 h-8 w-64 mx-auto rounded-md"></div>
-          </div>
-        </div>
-      </div>
-    )
   }
 
   return (
