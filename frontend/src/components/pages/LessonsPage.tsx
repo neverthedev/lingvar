@@ -16,9 +16,9 @@ const lessonsData = [
   {
     id: 'plural-nouns',
     title: 'Plural Nouns',
-    description: 'Master the rules of plural noun formation and practice with various examples and exceptions.',
+    description: 'Master the formation and usage of plural nouns. Understand different pluralization rules.',
     href: '/lessons/plural-nouns',
-    difficulty: 'Beginner' as const,
+    difficulty: 'Intermediate' as const,
     duration: '20 min'
   }
 ]
@@ -54,18 +54,7 @@ export default function LessonsPage() {
           </Typography>
         </div>
 
-        <LessonGrid lessons={lessonsData} className="max-w-4xl mx-auto" />
-
-        {/* Coming Soon Section */}
-        <div className="mt-16 text-center">
-          <Typography variant="h2" weight="bold" align="center" className="mb-4">
-            More Lessons Coming Soon
-          </Typography>
-          <Typography variant="body" color="secondary" align="center" className="max-w-2xl mx-auto">
-            We're constantly adding new lessons to help you improve your language skills.
-            Check back regularly for updates on verb conjugations, adjectives, and more advanced topics.
-          </Typography>
-        </div>
+        <LessonGrid lessons={lessonsData} />
       </div>
     </PageLayout>
   )

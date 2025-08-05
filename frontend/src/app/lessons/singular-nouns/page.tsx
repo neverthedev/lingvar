@@ -2,8 +2,7 @@
 
 import { useAuth } from '@/contexts/AuthContext'
 import { AuthService, API_ENDPOINTS } from '@/lib/api'
-import Navigation from '@/components/Navigation'
-import LessonLoading from '@/components/LessonLoading'
+import { LessonLayout, Typography, Button, Icon, LoadingSpinner, InteractiveLessonTable } from '@/components'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState, useEffect } from 'react'
@@ -133,10 +132,10 @@ export default function SingularNounsLesson() {
   }
 
   // Handle OK button click
-  const handleOk = (noun: Noun, caseKey: string) => {
-    const cellKey = `${noun.id}-${caseKey}`
+  const handleOk = (item: any, caseKey: string) => {
+    const cellKey = `${item.id}-${caseKey}`
     const inputValue = inputValues[cellKey]?.trim().toLowerCase()
-    const correctValue = noun[caseKey as keyof Noun]?.toString().toLowerCase()
+    const correctValue = item[caseKey as keyof typeof item]?.toString().toLowerCase()
 
     if (inputValue === correctValue) {
       // Correct answer
@@ -146,7 +145,7 @@ export default function SingularNounsLesson() {
           isEditing: false,
           isCorrect: true,
           showAnswer: true,
-          answer: noun[caseKey as keyof Noun]?.toString()
+          answer: item[caseKey as keyof typeof item]?.toString()
         }
       }))
       setInputValues(prev => ({ ...prev, [cellKey]: '' }))
@@ -164,7 +163,7 @@ export default function SingularNounsLesson() {
             isEditing: false,
             isCorrect: false,
             showAnswer: true,
-            answer: noun[caseKey as keyof Noun]?.toString()
+            answer: item[caseKey as keyof typeof item]?.toString()
           }
         }))
         setInputValues(prev => ({ ...prev, [cellKey]: '' }))
@@ -194,99 +193,8 @@ export default function SingularNounsLesson() {
     setInputValues({})
   }
 
-  // Get cell content
-  const getCellContent = (noun: Noun, caseKey: string) => {
-    const cellKey = `${noun.id}-${caseKey}`
-    const cellState = cellStates[cellKey]
-    const inputValue = inputValues[cellKey] || ''
-    const attemptCount = attempts[cellKey] || 0
-
-    if (cellState?.isEditing) {
-      return (
-        <div className="flex items-center">
-          <input
-            type="text"
-            value={inputValue}
-            onChange={(e) => handleInputChange(noun.id, caseKey, e.target.value)}
-            className="flex-1 px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500 mr-1"
-            placeholder="Enter word..."
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                handleOk(noun, caseKey)
-              } else if (e.key === 'Escape') {
-                handleCancel(noun.id, caseKey)
-              }
-            }}
-            autoFocus
-          />
-          <div className="flex ml-1">
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                handleOk(noun, caseKey)
-              }}
-              className="p-0.5 text-green-600 hover:text-green-800 hover:bg-green-50 rounded"
-              title="OK"
-            >
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                handleCancel(noun.id, caseKey)
-              }}
-              className="p-0.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded ml-0.5"
-              title="Cancel"
-            >
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          {attemptCount > 0 && (
-            <div className="text-xs text-red-500 ml-2">
-              {attemptCount}/3
-            </div>
-          )}
-        </div>
-      )
-    }
-
-    if (cellState?.showAnswer) {
-      return (
-        <span className="font-medium">
-          {cellState.answer}
-        </span>
-      )
-    }
-
-    return (
-      <div className="text-center">
-        <span className="text-gray-400">Click to fill</span>
-      </div>
-    )
-  }
-
-  // Get cell class
-  const getCellClass = (noun: Noun, caseKey: string) => {
-    const cellKey = `${noun.id}-${caseKey}`
-    const cellState = cellStates[cellKey]
-
-    if (cellState?.showAnswer) {
-      if (cellState.isCorrect) {
-        return "p-3 border-2 border-green-500 bg-green-50 transition-colors"
-      } else {
-        return "p-3 border-2 border-red-500 bg-red-50 transition-colors"
-      }
-    }
-
-    return "p-3 border cursor-pointer hover:bg-gray-50 transition-colors"
-  }
-
   if (isLoading || loading) {
-    return <LessonLoading />
+    return <LoadingSpinner size="lg" />
   } else if (!isAuthenticated) {
     // Redirect to login if not authenticated
     router.push('/login')
@@ -295,21 +203,16 @@ export default function SingularNounsLesson() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <Navigation />
-        <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
-          <div className="text-center">
-            <div className="text-red-600 text-lg">{error}</div>
-          </div>
+      <LessonLayout>
+        <div className="text-center">
+          <Typography variant="h2" className="text-red-600">{error}</Typography>
         </div>
-      </div>
+      </LessonLayout>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Navigation />
-
+    <LessonLayout>
       <main className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
         {/* Breadcrumb */}
         <nav className="mb-8">
@@ -320,9 +223,7 @@ export default function SingularNounsLesson() {
               </Link>
             </li>
             <li>
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
+              <Icon name="arrow-right" size="sm" />
             </li>
             <li className="text-gray-900">Singular Nouns</li>
           </ol>
@@ -331,82 +232,41 @@ export default function SingularNounsLesson() {
         {/* Lesson Header */}
         <div className="flex items-center justify-center mb-6">
           <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mr-4">
-            <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
+            <Icon name="document" size="md" className="text-blue-600" />
           </div>
-          <h1 className="text-3xl font-extrabold text-gray-900">
+          <Typography variant="h1" className="text-3xl font-extrabold text-gray-900">
             Singular Nouns Exercise
-          </h1>
+          </Typography>
         </div>
 
-        {/* Interactive Exercise Table */}
-        <div className="bg-white rounded-lg shadow-lg">
-          <div className="p-4 border-b bg-gray-50">
-            <h3 className="text-lg font-semibold text-gray-900">Interactive Exercise</h3>
-            <p className="text-sm text-gray-600 mt-1">
-              Click on any case cell to fill in the correct form. You have 3 attempts per cell.
-            </p>
-          </div>
-
-          <div className="relative">
-            <table className="w-full">
-              {/* Fixed Header */}
-              <thead className="bg-gray-50 sticky top-0 z-50 shadow-sm">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sticky left-0 bg-gray-50 z-50 border-r min-w-[120px] shadow-sm">
-                    Word
-                  </th>
-                  {cases.map((case_) => (
-                    <th key={case_.key} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[150px] bg-gray-50">
-                      {case_.name}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-
-              {/* Table Body */}
-              <tbody className="bg-white divide-y divide-gray-200">
-                {nouns.map((noun, index) => (
-                  <tr key={noun.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                    {/* Fixed Word Column */}
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 sticky left-0 bg-inherit z-10 border-r">
-                      {noun.word}
-                    </td>
-
-                    {/* Case Columns */}
-                    {cases.map((case_) => (
-                      <td
-                        key={`${noun.id}-${case_.key}`}
-                        className={getCellClass(noun, case_.key)}
-                        onClick={() => handleCellClick(noun.id, case_.key)}
-                      >
-                        {getCellContent(noun, case_.key)}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <InteractiveLessonTable
+          data={nouns}
+          cases={cases}
+          cellStates={cellStates}
+          inputValues={inputValues}
+          attempts={attempts}
+          onCellClick={handleCellClick}
+          onInputChange={handleInputChange}
+          onOk={handleOk}
+          onCancel={handleCancel}
+          title="Interactive Exercise"
+          description="Click on any case cell to fill in the correct form. You have 3 attempts per cell."
+        />
 
         {/* Navigation */}
         <div className="mt-8 flex justify-between">
-          <Link
-            href="/lessons"
-            className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-6 py-2 rounded-md font-medium"
-          >
-            ← Back to Lessons
+          <Link href="/lessons">
+            <Button variant="secondary" size="md">
+              ← Back to Lessons
+            </Button>
           </Link>
-          <Link
-            href="/lessons/plural-nouns"
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-md font-medium"
-          >
-            Next: Plural Nouns →
+          <Link href="/lessons/plural-nouns">
+            <Button variant="primary" size="md">
+              Next: Plural Nouns →
+            </Button>
           </Link>
         </div>
       </main>
-    </div>
+    </LessonLayout>
   )
 }

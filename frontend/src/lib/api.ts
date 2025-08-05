@@ -54,7 +54,7 @@ export class AuthService {
     return null
   }
 
-  static setTokens(accessToken: string, tokenType: string): void {
+  static setTokens(accessToken: string, tokenType: string = 'Bearer'): void {
     if (typeof window !== 'undefined') {
       localStorage.setItem('access_token', accessToken)
       localStorage.setItem('token_type', tokenType)

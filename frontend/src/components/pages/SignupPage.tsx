@@ -40,7 +40,7 @@ export default function SignupPage() {
     <AuthLayout
       title="Create your account"
       alternativeAction={{
-        text: "Or",
+        text: "Already have an account?",
         linkText: "sign in to your existing account",
         href: "/login"
       }}
