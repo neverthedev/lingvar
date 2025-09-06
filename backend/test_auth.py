@@ -6,12 +6,14 @@ import sys
 import os
 sys.path.append('/workspaces/lingvar/backend')
 
-from database import test_connection, create_tables
+from services.database import test_connection, create_tables
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from database import Base, get_db, User
+from services.base import Base
+from services.database import get_db
+from models.user import User
 from main import app
 import tempfile
 import os

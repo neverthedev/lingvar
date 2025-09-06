@@ -3,7 +3,8 @@ from bs4 import BeautifulSoup
 from typing import Dict, Optional
 import re
 from dataclasses import dataclass
-from database import Noun, SessionLocal
+from models.vocabulary import Noun
+from services.database import SessionLocal
 import json
 from time import sleep
 

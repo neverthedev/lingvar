@@ -3,15 +3,15 @@ export const API_BASE_URL = 'http://localhost:8000'
 
 // API endpoints
 export const API_ENDPOINTS = {
-  register: `${API_BASE_URL}/register`,
-  login: `${API_BASE_URL}/token`,
+  register: `${API_BASE_URL}/users/register`,
+  login: `${API_BASE_URL}/users/token`,
   userMe: `${API_BASE_URL}/users/me`,
-  users: `${API_BASE_URL}/users`,
-  health: `${API_BASE_URL}/health`,
+  users: `${API_BASE_URL}/users/`,
+  health: `${API_BASE_URL}/api/health`,
   dbTest: `${API_BASE_URL}/api/db-test`,
   declensionLudzie: `${API_BASE_URL}/api/declension/ludzie`,
   nounsSingle: `${API_BASE_URL}/api/nouns/single`,
-  pronouns: `${API_BASE_URL}/api/pronouns`
+  pronouns: `${API_BASE_URL}/api/pronouns/`
 }
 
 // Types based on the API documentation
@@ -26,6 +26,7 @@ export interface UserResponse {
   username: string
   email: string
   is_active: boolean
+  is_superuser: boolean
   created_at: string
 }
 

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from services.auth import get_current_active_user
-from database import User as DBUser
+from models.user import User as DBUser
 
 router = APIRouter(
     prefix="/api/pronouns",

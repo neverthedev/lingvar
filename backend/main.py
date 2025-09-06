@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 import os
 
-from database import create_tables, test_connection
+from services.database import create_tables, test_connection
 from routers import users, nouns, pronouns, misc
 
 @asynccontextmanager

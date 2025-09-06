@@ -2,9 +2,10 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from database import get_db, Noun
+from services.database import get_db
+from models.vocabulary import Noun
+from models.user import User as DBUser
 from services.auth import get_current_active_user
-from database import User as DBUser
 
 router = APIRouter(
     prefix="/api/nouns",

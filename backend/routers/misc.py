@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import os
 
-from database import get_db, test_connection, User as DBUser
+from services.database import get_db, test_connection
+from models.user import User as DBUser
 from services.auth import get_current_active_user
 from lib.polish_declension_scraper import PolishDeclensionScraper
 
