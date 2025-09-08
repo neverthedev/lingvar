@@ -25,7 +25,7 @@ class Pronoun(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 class Verb(Base):
-    __tablename__ = "vers"
+    __tablename__ = "verbs"
 
     id = Column(Integer, primary_key=True, index=True)
     word = Column(String(100), nullable=False, index=True)

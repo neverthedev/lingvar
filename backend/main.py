@@ -5,7 +5,7 @@ import uvicorn
 import os
 
 from services.database import create_tables, test_connection
-from routers import users, nouns, pronouns, misc
+from routers import users, nouns, pronouns, verbs, misc
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -49,6 +49,7 @@ async def root():
 app.include_router(users.router)
 app.include_router(nouns.router)
 app.include_router(pronouns.router)
+app.include_router(verbs.router)
 app.include_router(misc.router)
 
 if __name__ == "__main__":
