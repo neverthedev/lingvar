@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
 from services.auth import get_current_active_user
+from services.database import get_db
 from models.user import User as DBUser
+from models.vocabulary import Pronoun
 
 router = APIRouter(
     prefix="/api/pronouns",
@@ -12,119 +15,22 @@ router = APIRouter(
 
 @router.get("/")
 async def get_pronouns(
-    current_user: DBUser = Depends(get_current_active_user)
+    current_user: DBUser = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
 ):
-    """Get Polish pronouns"""
+    """Get Polish pronouns from database"""
     all_cases = ["mianownik", "dopełniacz", "celownik", "biernik", "narzędnik", "miejscownik", "wołacz"]
 
-    # Polish pronouns with their declensions
-    pronouns_data = [
-        {
-            "id": 1,
-            "word": "ja",
-            "mianownik": "ja",
-            "dopełniacz": "mnie",
-            "celownik": "mnie, mi",
-            "biernik": "mnie",
-            "narzędnik": "mną",
-            "miejscownik": "mnie",
-            "wołacz": ""
-        },
-        {
-            "id": 2,
-            "word": "ty",
-            "mianownik": "ty",
-            "dopełniacz": "ciebie, cię",
-            "celownik": "tobie, ci",
-            "biernik": "ciebie, cię",
-            "narzędnik": "tobą",
-            "miejscownik": "tobie",
-            "wołacz": "ty"
-        },
-        {
-            "id": 3,
-            "word": "on",
-            "mianownik": "on",
-            "dopełniacz": "jego, niego, go",
-            "celownik": "jemu, niemu, mu",
-            "biernik": "jego, niego, go",
-            "narzędnik": "nim",
-            "miejscownik": "nim",
-            "wołacz": ""
-        },
-        {
-            "id": 4,
-            "word": "ona",
-            "mianownik": "ona",
-            "dopełniacz": "jej, niej",
-            "celownik": "jej, niej",
-            "biernik": "ją, nią",
-            "narzędnik": "nią",
-            "miejscownik": "niej",
-            "wołacz": ""
-        },
-        {
-            "id": 5,
-            "word": "ono",
-            "mianownik": "ono",
-            "dopełniacz": "jego, niego, go",
-            "celownik": "jemu, niemu, mu",
-            "biernik": "je, nie",
-            "narzędnik": "nim",
-            "miejscownik": "nim",
-            "wołacz": ""
-        },
-        {
-            "id": 6,
-            "word": "my",
-            "mianownik": "my",
-            "dopełniacz": "nas",
-            "celownik": "nam",
-            "biernik": "nas",
-            "narzędnik": "nami",
-            "miejscownik": "nas",
-            "wołacz": ""
-        },
-        {
-            "id": 7,
-            "word": "wy",
-            "mianownik": "wy",
-            "dopełniacz": "was",
-            "celownik": "wam",
-            "biernik": "was",
-            "narzędnik": "wami",
-            "miejscownik": "was",
-            "wołacz": "wy"
-        },
-        {
-            "id": 8,
-            "word": "oni",
-            "mianownik": "oni",
-            "dopełniacz": "ich, nich",
-            "celownik": "im, nim",
-            "biernik": "ich, nich",
-            "narzędnik": "nimi",
-            "miejscownik": "nich",
-            "wołacz": ""
-        },
-        {
-            "id": 9,
-            "word": "one",
-            "mianownik": "one",
-            "dopełniacz": "ich, nich",
-            "celownik": "im, nim",
-            "biernik": "je, nie",
-            "narzędnik": "nimi",
-            "miejscownik": "nich",
-            "wołacz": ""
-        }
-    ]
+    # Fetch pronouns from database
+    pronouns = db.query(Pronoun).order_by(Pronoun.id).all()
 
-    # Ensure all cases are present with empty string defaults
+    # Transform database records to API response format
     result = []
-    for pronoun in pronouns_data:
-        flat = {"id": pronoun["id"], "word": pronoun["word"]}
+    for pronoun in pronouns:
+        flat = {"id": pronoun.id, "word": pronoun.word}
+        # Add all cases from the JSONB cases field
         for case in all_cases:
-            flat[case] = pronoun.get(case, "")
+            flat[case] = pronoun.cases.get(case, "")
         result.append(flat)
+
     return result

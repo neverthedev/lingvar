@@ -9,7 +9,7 @@ load_dotenv()
 from services.base import Base
 # Import models to register them with SQLAlchemy metadata for table creation
 from models.user import User
-from models.vocabulary import Noun, Pronoun
+from models.vocabulary import Noun, Pronoun, Verb
 
 # Database URL - PostgreSQL for production, SQLite for local development
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./lingvar.db")

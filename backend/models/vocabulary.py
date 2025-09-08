@@ -23,3 +23,12 @@ class Pronoun(Base):
     cases = Column(JSONB, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+class Verb(Base):
+    __tablename__ = "vers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    word = Column(String(100), nullable=False, index=True)
+    cases = Column(JSONB, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())

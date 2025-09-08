@@ -11,6 +11,7 @@ env/
 venv/
 .venv/
 .env
+backend/tmp
 
 # Node.js
 node_modules/
