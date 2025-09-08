@@ -11,7 +11,8 @@ export const API_ENDPOINTS = {
   dbTest: `${API_BASE_URL}/api/db-test`,
   declensionLudzie: `${API_BASE_URL}/api/declension/ludzie`,
   nounsSingle: `${API_BASE_URL}/api/nouns/single`,
-  pronouns: `${API_BASE_URL}/api/pronouns/`
+  pronouns: `${API_BASE_URL}/api/pronouns/`,
+  verbs: `${API_BASE_URL}/api/verbs/`
 }
 
 // Types based on the API documentation

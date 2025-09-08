@@ -22,6 +22,14 @@ const lessonsData = [
     duration: '20 min'
   },
   {
+    id: 'verbs',
+    title: 'Verbs',
+    description: 'Master Polish verb conjugation across different personal pronouns and practice with various examples.',
+    href: '/lessons/verbs',
+    difficulty: 'Intermediate' as const,
+    duration: '25 min'
+  },
+  {
     id: 'plural-nouns',
     title: 'Plural Nouns',
     description: 'Master the rules of plural noun formation and practice with various examples and exceptions.',

@@ -6,48 +6,41 @@ import { LessonLayout, Typography, Icon, InteractiveLessonTable, LessonNavigatio
 import { useRouter } from 'next/navigation'
 import { useState, useEffect } from 'react'
 
-export default function PronounsLesson() {
+export default function VerbsLesson() {
   const { isAuthenticated, isLoading } = useAuth()
   const router = useRouter()
 
-  // Type definitions for pronouns
-  interface Pronoun {
+  // Type definitions
+  interface Verb {
     id: number
     word: string
-    mianownik: string
-    dopełniacz: string
-    celownik: string
-    biernik: string
-    narzędnik: string
-    miejscownik: string
-    wołacz: string
+    ja: string
+    ty: string
+    ono: string
+    my: string
+    wy: string
+    one: string
   }
 
-  const [pronouns, setPronouns] = useState<Pronoun[]>([])
+  const [verbs, setVerbs] = useState<Verb[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  // Cases configuration
+  // Personal pronouns configuration
   const cases = [
-    { key: 'dopełniacz', name: 'Dopełniacz' },
-    { key: 'celownik', name: 'Celownik' },
-    { key: 'biernik', name: 'Biernik' },
-    { key: 'narzędnik', name: 'Narzędnik' },
-    { key: 'miejscownik', name: 'Miejscownik' },
-    { key: 'wołacz', name: 'Wołacz' }
+    { key: 'ja', name: 'Ja' },
+    { key: 'ty', name: 'Ty' },
+    { key: 'ono', name: 'On/Ona/Ono' },
+    { key: 'my', name: 'My' },
+    { key: 'wy', name: 'Wy' },
+    { key: 'one', name: 'Oni/One' }
   ]
 
-  // Breadcrumb configuration
-  const breadcrumbs = [
-    { href: '/lessons', label: 'Lessons' },
-    { label: 'Pronouns', current: true }
-  ]
-
-  // Fetch pronouns from API
+  // Fetch verbs from API
   useEffect(() => {
-    const fetchPronouns = async () => {
+    const fetchVerbs = async () => {
       try {
-        const response = await fetch(API_ENDPOINTS.pronouns, {
+        const response = await fetch(API_ENDPOINTS.verbs, {
           method: 'GET',
           headers: AuthService.getAuthHeaders()
         })
@@ -59,14 +52,14 @@ export default function PronounsLesson() {
             router.push('/login')
             return
           }
-          throw new Error('Failed to fetch pronouns')
+          throw new Error('Failed to fetch verbs')
         }
 
         const data = await response.json()
-        setPronouns(data)
+        setVerbs(data)
       } catch (err) {
-        console.error('Error fetching pronouns:', err)
-        setError('Failed to load pronouns. Please try again.')
+        console.error('Error fetching verbs:', err)
+        setError('Failed to load verbs. Please try again.')
       } finally {
         setLoading(false)
       }
@@ -74,34 +67,40 @@ export default function PronounsLesson() {
 
     // Only fetch if user is authenticated
     if (isAuthenticated && !isLoading) {
-      fetchPronouns()
+      fetchVerbs()
     } else if (!isLoading && !isAuthenticated) {
       setLoading(false)
     }
   }, [isAuthenticated, isLoading, router])
 
+  // Breadcrumb configuration
+  const breadcrumbs = [
+    { href: '/lessons', label: 'Lessons' },
+    { label: 'Verbs', current: true }
+  ]
+
   return (
     <LessonLayout loading={isLoading || loading} error={error} breadcrumbs={breadcrumbs}>
       {/* Lesson Header */}
       <div className="flex items-center justify-center mb-6">
-        <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mr-4">
-          <Icon name="user" size="md" className="text-purple-600" />
+        <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mr-4">
+          <Icon name="book" size="md" className="text-green-600" />
         </div>
         <Typography variant="h1" className="text-3xl font-extrabold text-gray-900">
-          Pronouns Exercise
+          Verbs Exercise
         </Typography>
       </div>
 
       <InteractiveLessonTable
-        data={pronouns}
+        data={verbs}
         cases={cases}
-        title="Pronouns Declension"
-        description="Click on any case cell to fill in the correct form. You have 3 attempts per cell."
+        title="Verb Conjugation"
+        description="Click on any conjugation cell to fill in the correct form. You have 3 attempts per cell."
       />
 
       <LessonNavigation
-        previousLesson={{ href: '/lessons/singular-nouns', title: 'Singular Nouns' }}
-        nextLesson={{ href: '/lessons/verbs', title: 'Verbs' }}
+        previousLesson={{ href: '/lessons/pronouns', title: 'Pronouns' }}
+        nextLesson={{ href: '/lessons/plural-nouns', title: 'Plural Nouns' }}
         backToLessons={{ href: '/lessons', title: 'Back to Lessons' }}
       />
     </LessonLayout>
