@@ -7,8 +7,6 @@ services:
       POSTGRES_DB: lingvar
       POSTGRES_USER: lingvar_user
       POSTGRES_PASSWORD: lingvar_password
-    ports:
-      - "5432:5432"
     volumes:
       - ./database/data:/var/lib/postgresql/data
       - ./database/init:/docker-entrypoint-initdb.d

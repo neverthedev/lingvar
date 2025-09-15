@@ -5,7 +5,6 @@ import os
 from services.database import get_db, test_connection
 from models.user import User as DBUser
 from services.auth import get_current_active_user
-from lib.polish_declension_scraper import PolishDeclensionScraper
 
 router = APIRouter(
     prefix="/api",
@@ -40,17 +39,3 @@ async def test_database_connection(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-@router.get("/declension/ludzie")
-async def get_ludzie_declension(current_user: DBUser = Depends(get_current_active_user)):
-    """Get Polish declension for the word 'ludzie'"""
-    scraper = PolishDeclensionScraper()
-    result = scraper.get_ludzie_declension()
-
-    if not result:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to scrape declension data"
-        )
-
-    return scraper.format_declension_result(result)

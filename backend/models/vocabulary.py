@@ -1,6 +1,7 @@
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from services.base import Base
 
 # SQLAlchemy models for vocabulary items
@@ -32,3 +33,18 @@ class Verb(Base):
     cases = Column(JSONB, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+class Rule(Base):
+    __tablename__ = "rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(200), nullable=False, index=True)
+    description = Column(Text, nullable=False)
+    parent_rule_id = Column(Integer, ForeignKey("rules.id"), nullable=True, index=True)
+    ordering = Column(Integer, nullable=True, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Self-referencing relationship for subrules
+    parent_rule = relationship("Rule", remote_side=[id], back_populates="subrules")
+    subrules = relationship("Rule", back_populates="parent_rule", order_by="Rule.ordering")
