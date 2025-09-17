@@ -8,7 +8,8 @@ RUN apk add --no-cache \
     musl-dev \
     postgresql-client \
     postgresql-dev \
-    bash
+    bash \
+    git
 
 # Copy requirements first for better caching
 COPY requirements.txt .
