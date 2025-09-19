@@ -12,4 +12,4 @@ async def admin_root():
     """
     Admin root endpoint
     """
-    return {"message": "Aedmin API", "available_endpoints": ["/admin/nouns"]}
+    return {"message": "Admin API", "available_endpoints": ["/admin/nouns"]}

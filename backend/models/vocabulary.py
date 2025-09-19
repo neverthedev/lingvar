@@ -34,6 +34,15 @@ class Verb(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
+class Numerator(Base):
+    __tablename__ = "numerators"
+
+    id = Column(Integer, primary_key=True, index=True)
+    word = Column(String(100), nullable=False, index=True)
+    translation = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
 class Rule(Base):
     __tablename__ = "rules"
 
