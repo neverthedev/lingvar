@@ -12,6 +12,7 @@ export {
   Breadcrumb,
   UserMenu,
   LessonCard,
+  ExerciseCard,
   LessonSection,
   LessonNavigation
 } from './molecules'

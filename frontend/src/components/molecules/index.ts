@@ -14,6 +14,9 @@ export type { UserMenuProps } from './UserMenu'
 export { LessonCard } from './LessonCard'
 export type { LessonCardProps } from './LessonCard'
 
+export { ExerciseCard } from './ExerciseCard'
+export type { ExerciseCardProps } from './ExerciseCard'
+
 export { LessonSection } from './LessonSection'
 
 export { LessonNavigation } from './LessonNavigation'

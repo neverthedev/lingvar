@@ -1,5 +1,6 @@
 // API configuration
 export const API_BASE_URL = 'http://localhost:8000'
+// export const API_BASE_URL = 'http://192.168.60.146:8000'
 
 // API endpoints
 export const API_ENDPOINTS = {
@@ -12,7 +13,8 @@ export const API_ENDPOINTS = {
   declensionLudzie: `${API_BASE_URL}/api/declension/ludzie`,
   nounsSingle: `${API_BASE_URL}/api/nouns/single`,
   pronouns: `${API_BASE_URL}/api/pronouns/`,
-  verbs: `${API_BASE_URL}/api/verbs/`
+  verbs: `${API_BASE_URL}/api/verbs/`,
+  exercises: `${API_BASE_URL}/api/exercises/`
 }
 
 // Types based on the API documentation

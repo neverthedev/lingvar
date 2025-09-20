@@ -33,7 +33,7 @@ async def get_numerators_exercise(
         exercise_items.append({
             "id": str(numerator.id),
             "word": numerator.word,
-            "translation": numerator.translation
+            "description": numerator.translation
         })
 
     return exercise_items
