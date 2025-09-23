@@ -11,250 +11,7 @@ import logging
 from datetime import datetime
 import os
 
-words = [
-    "Droga", "Hiszpania", "Jowisz", "Księżyc", "Mars", "Merkury", "Neptun",
-    "Niemcy", "Pluton", "Saturn", "Słońce", "USB", "Uran", "Wenus", "Włochy",
-    "Ziemia", "absynt", "adres", "agrest", "akademik", "akordeon", "aktor",
-    "aktorka", "aleja", "alergia", "alkohol", "altówka", "amerykanin", "ananas",
-    "angielka", "anglik", "anioł", "anyż", "aplikacja", "apteczka", "apteka",
-    "arbuz", "architekt", "architektura", "arcydzieło", "artykuł", "artykuły",
-    "asekuracja", "astronomia", "autobus", "autokar", "autor", "autostrada",
-    "babcia", "badminton", "bagietka", "bajka", "bakalie", "bakłażan",
-    "baletnica", "balkon", "balon", "balsam", "banan", "bandaż", "bank",
-    "bankiet", "bar", "bark", "barman", "barszcz", "barwa", "baseball",
-    "bazylia", "baśń", "bażant", "beletrystyka", "bezpieczeństwa", "bezsenność",
-    "biblioteka", "biedronka", "biegunka", "bilard", "bilet", "bimber",
-    "biodro", "biografia", "biologia", "bita", "biurko", "biurowiec",
-    "biustonosz", "biżuteria", "blok", "blokowisko", "bluza", "bluzka",
-    "bocian", "boczek", "boisko", "boks", "bramka", "bramkarz", "bransoletka",
-    "branża", "brat", "bratanek", "bratanica", "bretońsku", "brew", "broda",
-    "brokuł", "broszka", "broń", "bruzda", "brwi", "brydż", "bryndza",
-    "brzoskwinia", "brzuch", "budowla", "budynek", "budyń", "bulion", "burak",
-    "bursztyn", "burza", "butelek", "buty", "bułka", "byk", "bóbr", "ból",
-    "błyskawica", "błyszczyk", "camping", "całoksztalt", "cebula", "cecha",
-    "centrum", "cewka", "chałka", "chałwa", "chemia", "chipsy", "chińczyk",
-    "chleb", "chlebak", "chochla", "chodnik", "chomik", "choroba", "chrzan",
-    "chrząszcz", "chusteczka", "chwila", "chłopak", "chłopiec", "ciasta",
-    "ciastko", "ciasto", "ciała", "ciało", "cienie", "cień", "ciocia", "cios",
-    "ciuch", "ciężarówka", "ciśnienie", "cmentarz", "cukier", "cukierek",
-    "cukiernicze", "cukierniczka", "cukinia", "cydr", "cykoria", "cynamon",
-    "czajnik", "czapka", "czapla", "czas", "czasopismo", "czaszka", "czekolada",
-    "czelność", "czereśnia", "czerwiec", "cześć", "czosnek", "czoło",
-    "czołówka", "czwartek", "czynnik", "czytanie", "czytelnik", "cząber",
-    "część", "córka", "cło", "dach", "daktyl", "danie", "datek", "decyzja",
-    "dekada", "delfin", "dentysta", "dentystka", "deser", "deskorolka",
-    "deszcz", "deszczem", "dezodorant", "dieta", "dinozaur", "dla", "do",
-    "doba", "dobranoc", "dodatek", "doktor", "doktorat", "dolewka", "dom",
-    "domino", "dostarczenie", "dostawa", "doświadczenie", "dramat", "dres",
-    "dreszcz", "dreszcze", "drewno", "drink", "droga", "drogeria", "drożdżówka",
-    "druk", "drukarka", "drzewo", "drzwi", "drób", "drążek", "dupa", "durszlak",
-    "dworzec", "dwudziestka", "dymka", "dynia", "dyrektor", "dyrygent", "dywan",
-    "dywanik", "dzban", "dzbanek", "dziadek", "dziadkowie", "dzieci", "dziecko",
-    "dziedziczność", "dziedziniec", "dzielnica", "dziennikarka", "dziennikarz",
-    "dzierżawczy", "dzień", "dzik", "dziura", "dziurkacz", "dzięcioł", "dzwon",
-    "dłoń", "długopis", "dźwig", "dźwięk", "dżdżownica", "dżem", "dżuma",
-    "edukacja", "egzamin", "ekonomia", "ekspedient", "ekspedientka", "emeryt",
-    "emerytka", "etyka", "fabryka", "facet", "fachowiec", "faktu", "fala",
-    "fantastyka", "farba", "fartuch", "fasola", "fasolka", "ferie", "fiction",
-    "filet", "filiżanka", "filologia", "filozofia", "fizyka", "flaming", "flet",
-    "foka", "fortepian", "fotel", "frajda", "francuzka", "frytki",
-    "frytkownica", "funt", "gabinet", "gad", "galaktyka", "galareta",
-    "galaretka", "ganek", "garaż", "garderoba", "gardło", "garnek", "garnitur",
-    "gatunek", "gałka", "geografia", "gimnastyka", "gimnazjum", "gips",
-    "gitara", "golenia", "golf", "golonka", "gorczyca", "goryl", "gorączka",
-    "gotówka", "gołoledź", "gołąb", "gra", "grad", "granat", "grochówka",
-    "groszek", "grudzień", "gruszka", "gruzja", "grzanka", "grzebień", "grzmot",
-    "grzyb", "grzywka", "gulasz", "guma", "gumka", "gust", "guzek", "guzik",
-    "gwarancja", "gwiazda", "gwiazdozbiór", "góra", "gęś", "głaz", "główka",
-    "hala", "harfa", "harmonijka", "hasło", "hałas", "helikopter",
-    "herbaciarnia", "herbata", "herbatnik", "hipopotam", "historia", "hiszpan",
-    "hobby", "hokej", "homar", "horror", "hulajnoga", "huragan", "hydraulik",
-    "iglica", "igła", "ilość", "imbir", "imię", "impreza", "indyk",
-    "informacja", "informatyka", "instrument", "inwalidzki", "inżynier",
-    "jabłecznik", "jabłko", "jadalnia", "jadłospis", "jagoda", "jajecznica",
-    "jajka", "jajko", "japończyk", "jaskinia", "jaskółka", "jastrząb",
-    "jaszczurka", "jeansy", "jedzenie", "jeleń", "jesień", "jezdnia", "jezioro",
-    "jeździectwo", "jeż", "jogurt", "jubiler", "język", "kabel", "kac",
-    "kaczka", "kakao", "kalafior", "kalendarz", "kameleon", "kamienica",
-    "kamizelka", "kanapa", "kanapka", "kanarek", "kangur", "kapelusz",
-    "kapusta", "karaluch", "karetka", "kark", "karmnik", "karnet", "kartkówka",
-    "kartofel", "karty", "kasza", "kaszanka", "kaszel", "katar", "kawa",
-    "kawaler", "kawiarnia", "kawior", "kawy", "kciuk", "keczup", "kefir",
-    "kelner", "kibic", "kieliszek", "kierowca", "kierunek", "kieszeń",
-    "kiełbasa", "kijanka", "kino", "kiosk", "kisiel", "kiwi", "klapki",
-    "klarnet", "klasa", "klatka", "klawiatura", "klej", "kleszcz", "klient",
-    "klimatyzacja", "klub", "klucz", "kmin", "knajpa", "knajpka", "kobieta",
-    "koc", "kocię", "kod", "kogut", "kokos", "koktajl", "kolacja", "kolano",
-    "kolczyk", "kolczyki", "kolejka", "kolekcja", "kolendra", "koleżanka",
-    "koliber", "kolokwium", "kolor", "komar", "kometa", "komiks", "komin",
-    "kominek", "komisariat", "komoda", "kompot", "kompozytor", "komputer",
-    "komórka", "koncentrat", "konfekcja", "konfitura", "konkubent",
-    "konsternacja", "kontrabas", "konturówka", "kontynent", "kopalnia", "koper",
-    "koperek", "korale", "korek", "korektor", "korkociąg", "kornik", "kort",
-    "korytarz", "kos", "kosmetyki", "kostium", "kostka", "kosz", "koszula",
-    "koszulka", "koszykówka", "kot", "kotlet", "kowal", "koza", "kozica",
-    "kołdra", "kołnierz", "koło", "koń", "kości", "kościół", "kość", "krawat",
-    "kreda", "kredka", "krem", "kret", "krew", "krewni", "krogulec", "krojenia",
-    "krokodyl", "kruk", "krzesło", "krzyżówka", "królik", "krąg", "kręgle",
-    "kręgosłup", "kserokopiarka", "książka", "książki", "księgarnia", "księżyc",
-    "kubek", "kucharz", "kuchenka", "kuchnia", "kucyk", "kukurydza", "kukułka",
-    "kula", "kultura", "kura", "kurczak", "kurkuma", "kuropatwa", "kurtka",
-    "kuzyn", "kuzynka", "kwadrans", "kwartał", "kwas", "kwiaciarnia",
-    "kwiecień", "kąpiel", "kąsek", "kęs", "kłódka", "lakier", "lampa", "lampka",
-    "las", "lato", "legitymacja", "lek", "lekarka", "lekarstwo", "lekarz",
-    "lekcja", "lekki", "lekkoatletyka", "len", "lew", "licencjat", "liceum",
-    "licytacja", "liczba", "linijka", "lipiec", "lis", "list", "listonosz",
-    "listonoszka", "listopad", "literatura", "literówka", "litwin", "litwinka",
-    "liść", "lodowiec", "lody", "lodziarnia", "lodówka", "lokówka", "los",
-    "lotnisko", "lustro", "luty", "lęk", "macierzanka", "macocha", "magister",
-    "magisterka", "maj", "majonez", "majtki", "makaron", "makijaż", "makowiec",
-    "malarka", "malarz", "mama", "mandarynka", "mango", "mapa", "marchewka",
-    "marynarka", "marynarz", "marzec", "maseczka", "maszynka", "masło",
-    "matematyka", "matka", "matura", "małpa", "małżeństwo", "maślanka", "meble",
-    "melodia", "melon", "metal", "metro", "mewa", "miara", "miasto", "miejsce",
-    "miesiąc", "migdał", "mikrofalówka", "minuta", "miotacz", "mistrz",
-    "mistrzostwa", "mit", "mizeria", "miód", "miękko", "mięsa", "mięsem",
-    "mięsień", "mięso", "mięta", "miłość", "mleka", "mleko", "mnóstwo",
-    "modliszka", "mop", "morela", "mors", "morze", "most", "motocykl", "motyl",
-    "mrówka", "mróz", "mucha", "mur", "muszka", "musztarda", "muzeum", "muzyk",
-    "muzyka", "mydło", "mysz", "myszka", "mózg", "mąka", "mąż", "męka",
-    "mężatka", "młodzieniec", "mżawka", "nabiał", "naczynie", "naczyń",
-    "nadawca", "nadgarstek", "nadwaga", "nagranie", "nalewka", "naleśniki",
-    "namiot", "napiwek", "napięcie", "napoje", "napój", "narciarstwo",
-    "narodowość", "narty", "narzędzie", "naszyjnik", "nauczyciel",
-    "nauczycielka", "nazwisko", "nerka", "nerw", "niedziela", "niedźwiedź",
-    "niemowlę", "nieobecność", "nietoperz", "nić", "noc", "noga", "nos",
-    "nosorożec", "nowela", "nurkowanie", "nów", "nóż", "nędza", "obcy",
-    "obecność", "obiad", "obieraczka", "obniżka", "obojczyk", "obraz", "obrus",
-    "obrzeże", "obrączka", "obsługa", "oburzenie", "obwarzanek", "obwód",
-    "obywatelstwo", "obój", "obóz", "obłok", "ocean", "ocet", "oczu", "odbyt",
-    "odcień", "oddział", "odkurzacz", "odporność", "odpowiedź", "odzież",
-    "ofiara", "ogień", "ognisko", "ogrzewanie", "ogórek", "ojciec", "okap",
-    "okno", "oko", "okoliczność", "okres", "okulary", "okładka", "olej",
-    "oliwa", "omlet", "operacja", "opowiadanie", "opowieść", "orkiestra",
-    "orzech", "orzeł", "osa", "osiedle", "osioł", "otręby", "otwarcie",
-    "otwieracz", "owad", "owca", "owoc", "owsianka", "ozdoba", "ołówek",
-    "ośrodek", "pacjent", "paczka", "pająk", "palec", "paluch", "pamiętnik",
-    "pamięć", "pan", "pani", "panienka", "papieros", "papryka", "papuga",
-    "paragon", "parasol", "parking", "parkomat", "parter", "parówka", "pasek",
-    "pasja", "pasmanteria", "pasożyt", "pasta", "pasztet", "patelnia", "paw",
-    "paznokci", "paznokieć", "pazur", "pałeczki", "państwo", "październik",
-    "pchła", "pedagogika", "pendrive", "penis", "pensja", "perfumy", "perkusja",
-    "pet", "pełnia", "piasek", "pidżama", "piec", "pieczeń", "pieczywo", "pieg",
-    "piekarnia", "piekarnik", "pielęgniarka", "pielęgniarz", "pieniądze",
-    "pieprz", "pieprzniczka", "pieprzyk", "piernik", "pierogi", "pierś",
-    "pierścionek", "pies", "pieszych", "pietruszka", "pigułka", "pijawka",
-    "pilot", "ping-pong", "pingwin", "pionek", "piorun", "piosenka",
-    "piosenkarka", "pisarka", "pisarz", "pisklę", "piwnica", "piwo", "pizzeria",
-    "piątek", "pięta", "piętro", "piłka", "piłkarz", "plac", "placek",
-    "planeta", "plaster", "plastik", "plecak", "plecy", "plik", "plotkarka",
-    "pluskwa", "po", "pochwa", "pociecha", "pociąg", "poczta", "początkujący",
-    "pod", "podkoszulek", "podróżnicza", "podstawówka", "podudzie", "poduszka",
-    "podwieczorek", "podziw", "podłoga", "poeta", "poetka", "poezja", "pogoda",
-    "pogody", "pojazd", "poker", "pokolenie", "pokrywka", "pokój", "policjant",
-    "policzek", "politologia", "polka", "polonistyka", "pomarańcza", "pomidor",
-    "pomysł", "poniedziałek", "popiół", "popołudnie", "por", "pora", "poranek",
-    "portfel", "porywisty", "porzeczka", "posiłek", "potrawa", "potylica",
-    "powidła", "powiek", "powieka", "powietrze", "powieść", "powodzenia",
-    "powódź", "poziom", "południe", "pończochy", "pośladek", "pożar",
-    "pożywienie", "pożądanie", "pracownik", "pralka", "prawda", "prawnik",
-    "prawo", "precel", "problem", "profesor", "prognoza", "programista", "prom",
-    "prosię", "prowizja", "prysznic", "przebój", "przeciwieństwo",
-    "przedmieście", "przedmiot", "przedpokój", "przedpołudnie", "przedramię",
-    "przedsiębiorca", "przedsiębiorczość", "przedsięwzięcie", "przedszkole",
-    "przeglądarka", "przejście", "przekroczenie", "przemoc", "przepiórka",
-    "przerażenie", "przerwa", "przestrzeń", "przesąd", "przetrwanie",
-    "przeziębienie", "przełęcz", "prześcieradło", "przybysz", "przychodnia",
-    "przyczepa", "przyimek", "przyjaciel", "przyjaciółka", "przyjaźń",
-    "przymiotnik", "przymrozek", "przyprawa", "przystanek", "przystawka",
-    "próg", "prąd", "psychologia", "pszczoła", "ptak", "puchacz", "puder",
-    "pudełko", "pustynia", "półka", "północ", "półrocze", "półwysep", "pączek",
-    "pęcherz", "pęczek", "pęd", "pędzel", "pędzelek", "pępek", "pętla",
-    "płaszcz", "płatki", "płatność", "płaz", "płeć", "płuco", "płyta",
-    "pływanie", "rachunek", "rajstopy", "rakieta", "ramię", "randka", "rano",
-    "ratunek", "ratusz", "razem", "recenzja", "recepta", "regal", "regał",
-    "religia", "restauracja", "reszta", "rezerwacja", "reżyser", "robak",
-    "rocznica", "rodzeństwo", "rodzice", "rogal", "rok", "roku", "rolada",
-    "rolnik", "romans", "rondel", "rondo", "ropucha", "rosjanka", "roszczenie",
-    "rosół", "rower", "rozmaryn", "rozmiar", "rozwód", "rumianek", "rura",
-    "ryba", "rynek", "ryzyko", "ryś", "ryż", "rzecz", "rzeczownik",
-    "rzeczywistość", "rzeka", "rzemiosło", "rzepa", "rzutnik", "rzęs", "rzęsa",
-    "róg", "róż", "ręcznik", "ręka", "rękaw", "rękawiczki", "ręki", "saksofon",
-    "sala", "salamandra", "salami", "salon", "salwa", "samochód", "samolot",
-    "samoobsługa", "samoopalacz", "satyra", "sałata", "sałatka", "schab",
-    "schody", "science", "segregator", "sekretarka", "sekretarz", "sekunda",
-    "seler", "semestr", "sepia", "ser", "serce", "seria", "sernik", "serwetka",
-    "sezam", "siatka", "siatkówka", "siekiera", "sielanka", "sierpień", "sieć",
-    "sikorka", "siniak", "siodło", "siostra", "siostrzenica", "siostrzeniec",
-    "sitko", "siłownia", "skaner", "skarpeta", "skarpetki", "sklep",
-    "skowronek", "skrzypce", "skrzyżowanie", "skuteczność", "skóra", "smak",
-    "smalec", "smycz", "smyczek", "sobota", "socjologia", "sofa", "sok",
-    "solniczka", "sos", "sosjerka", "spawacz", "spinacz", "spodek", "spodnie",
-    "spojrzenie", "spokój", "sport", "sposób", "społeczeństwie", "sprawa",
-    "sprawdzian", "sprawozdanie", "sprzątaczka", "sprzęt", "spódnica", "srebro",
-    "sroka", "ssak", "stacja", "stan", "stanik", "stanowisko", "starcie",
-    "staruszek", "statek", "staw", "sterta", "stolik", "stonoga", "stopa",
-    "stołówka", "strata", "strefa", "stroj", "struś", "strych", "stryjek",
-    "strzykawka", "strzęp", "strój", "styczeń", "stypendium", "stół", "sufit",
-    "sukces", "sukienka", "supeł", "suseł", "suszarka", "sutek", "suwak",
-    "sweter", "sworzeń", "sygnalizacja", "sylweta", "sylwetka", "syn",
-    "sypialnia", "szachownica", "szachy", "szacunek", "szafa", "szafka",
-    "szafran", "szalik", "szampan", "szampon", "szarlotka", "szatnia",
-    "szałwia", "szczenię", "szczepionka", "szczoteczka", "szczotka", "szczupak",
-    "szczur", "szczypiorek", "szczypiorniak", "szczyt", "szczęka", "szczęście",
-    "szelki", "szermierka", "szklanka", "szkoła", "szkło", "szlafrok", "szmer",
-    "szminka", "sznur", "sznurówki", "szorty", "szosa", "szpak", "szparagi",
-    "szpatułka", "szpinak", "szpital", "sztućce", "szuflada", "szwagier",
-    "szyba", "szycie", "szyja", "szyld", "szympans", "szynka", "sól", "sąd",
-    "sąsiadka", "sędzia", "sęp", "słaby", "słodycze", "słoik", "słowik",
-    "słownik", "słoń", "tabletka", "taboret", "taca", "taksówka", "talerz",
-    "talia", "taras", "tarcza", "tarczyca", "tarka", "tata", "taśma", "teatr",
-    "telewizor", "temperówka", "tenis", "test", "teść", "toaleta", "tom",
-    "torba", "torebka", "tors", "tort", "tożsamość", "tramwaj", "transport",
-    "trener", "treść", "trolejbus", "trufle", "truskawka", "tryb", "trzepaczka",
-    "trzustka", "trzęsienie", "trąbka", "tsunami", "tusz", "tułów", "tuńczyk",
-    "twardo", "twarożek", "twarz", "twaróg", "tydzień", "tygrys", "tymianek",
-    "tytoń", "tęcza", "tło", "ubieganie", "ubranie", "ucho", "uczelnia",
-    "uczta", "uderzenie", "udo", "ufność", "uiszczenie", "układ", "ulica",
-    "uniwersytet", "upał", "urzędniczka", "urzędnik", "usta", "ustawa", "utwór",
-    "użytkownik", "używka", "wada", "wafel", "waga", "wahadło", "wakacje",
-    "wanilia", "warga", "warkocz", "warsztat", "warunek", "warzywa",
-    "warzywniak", "warzywo", "waza", "wałek", "ważka", "weekend", "wejście",
-    "wiadukt", "wiara", "wiatr", "widelec", "wieczór", "wiedza", "wiek",
-    "wielbłąd", "wieloryb", "wiersz", "wiewiórka", "wieś", "wieżowiec", "wilk",
-    "winda", "wino", "winogrono", "wiolonczela", "wiśnia", "wnuczka", "wnuk",
-    "woda", "woreczek", "wpływ", "wrzesień", "wróbel", "wsparcie", "wspinanie",
-    "wstążka", "wstęp", "wtorek", "wujek", "wulkan", "wybrzeże", "wychowanie",
-    "wychowawca", "wydarzenie", "wydawca", "wydawnictwo", "wydra", "wygląd",
-    "wyjście", "wykaz", "wykałaczka", "wykształcenie", "wykład", "wymioty",
-    "wynik", "wynos", "wypadek", "wypracowanie", "wyroby", "wysiłek",
-    "wysokość", "wyspa", "wystawa", "wytrzymałość", "wywiad", "wyścig",
-    "wyśmienity", "wyżywienie", "wzgórze", "wzor", "wzrok", "wódka", "wózek",
-    "wąs", "wątpienie", "wątpliwość", "wątroba", "wątróbka", "wąż", "wędka",
-    "wędkarstwo", "wędrówka", "węzeł", "władza", "włoch", "włosy", "włoszka",
-    "włosów", "włóczka", "zabaw", "zachmurzenie", "zagłada", "zaimek", "zając",
-    "zakaz", "zakażenie", "zakres", "zakupy", "zakładka", "zaległość", "zaleta",
-    "zalotka", "zamieć", "zamrażalnik", "zamówienie", "zaparcie", "zarzut",
-    "zarządzanie", "zasada", "zasobnik", "zastawa", "zastrzyk", "zaszczyt",
-    "zatrucie", "zauroczenie", "zaułek", "zawartość", "zawieszka", "zawodnik",
-    "zawód", "założenie", "załącznik", "zbrodnia", "zdanie", "zdrajca",
-    "zdrowie", "ze", "zebra", "zebranie", "zegar", "zegarek", "zespoł",
-    "zestaw", "zeszyt", "ziarno", "ziele", "ziemi", "ziemniak", "ziemniaki",
-    "zima", "ziomek", "zioła", "zięć", "zlecenie", "zlew", "zmierzch",
-    "zmywarka", "zmęczenie", "znaczek", "zsiadłe", "zszywacz", "zupa",
-    "zwierzę", "związek", "zwycięstwo", "ząb", "złoto", "złotówka", "złudzenie",
-    "złącze", "ćma", "łabędź", "ładowarka", "łapówka", "łasica", "łasuch",
-    "ława", "ławica", "ławka", "łazienka", "łańcuch", "łeb", "łokieć",
-    "łopatka", "łotwa", "łotysz", "łoś", "łucznictwo", "łydka", "łyżeczka",
-    "łyżka", "łyżwiarstwo", "łyżwy", "łódka", "łódź", "łóżko", "łąka",
-    "ścierka", "ścieżka", "ścięgno", "śliwka", "ślusarz", "śmieci", "śmietanka",
-    "śniadanie", "śnieg", "śniegiem", "śnieżyca", "śpiwór", "środa", "środki",
-    "świder", "świerszcz", "świnia", "świnka", "świstak", "świt", "świątynia",
-    "święto", "źrebię", "źródło", "żaba", "żaglówka", "żarówka", "żbik",
-    "żeberka", "żebro", "żeglarstwo", "żel", "żelazo", "żmija", "żonkil",
-    "żołnierz", "żołądek", "żrebię", "żrenica", "żubr", "żuraw", "życie",
-    "żyrafa", "żyrandol", "żyto", "żyła", "żółty", "żółw", "żłobek"]
-
+words =['społeczeństwo', 'skarpeta']
 
 @dataclass
 class DeclensionResult:
@@ -272,8 +29,10 @@ class PolishDeclensionScraper:
 
     def __init__(self):
         self.session = requests.Session()
+        # Basic session configuration - headers will be enhanced per request
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'Connection': 'keep-alive',
+            'DNT': '1'
         })
 
     def scrape_declension(self, word: str) -> tuple[Optional[DeclensionResult]]:
@@ -287,10 +46,39 @@ class PolishDeclensionScraper:
             DeclensionResult object or None if parsing fails
         """
         try:
+            from urllib.parse import quote
+
+            # URL encode the word for headers to avoid encoding issues
+            encoded_word = quote(word.encode('utf-8'))
+
+            # Enhanced headers to mimic browser behavior
+            enhanced_headers = {
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                'Accept-Language': 'en-US,en;q=0.9,pl;q=0.8,ru;q=0.7',
+                'Cache-Control': 'max-age=0',
+                'Sec-Ch-Ua': '"Chromium";v="140", "Not=A?Brand";v="24", "Google Chrome";v="140"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"macOS"',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'same-origin',
+                'Sec-Fetch-User': '?1',
+                'Upgrade-Insecure-Requests': '1',
+                'Referer': f'https://odmiana.net/odmiana-przez-przypadki-rzeczownika-{encoded_word}',
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+                'Cookie': '_ga=GA1.1.1570150082.1757175221; FCCDCF=%5Bnull%2Cnull%2Cnull%2C%5B%22CQXUr8AQXUr8AEsACBPLB7FoAP_gAEPgAB5YIYJB7C7FbSFCyL5zaLsAMAhHR8AAQoQAAASBAmABQAKQIAQCgkAYFASABAACAAAAICRBIQIECAAAAUAAAAAAAAAEAAAAAAAIIAAAgAEAAAAIAAACAIAAEAAIAAAAEAAAmAgAAIIACAAAgAAAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAAAQAABBDBIPYXYraQoWRcKbBdgBgEK6PgACFCAAACQIEwAKABSBACAUkgCAIgQAAAAAAAABASIJAABAQEAAAgAIAAAAAAAgAAAAAABBAAAEAAgAAAAAAAAQBAAAgABAAAAAgAAESEAABBAAQAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAA.f_gAAAAAAAA%22%2C%222~70.89.93.108.122.149.184.196.236.259.311.313.314.323.358.415.442.486.494.495.540.574.723.827.864.981.1029.1047.1048.1051.1095.1097.1126.1205.1276.1301.1365.1415.1449.1514.1570.1577.1598.1651.1716.1735.1753.1765.1870.1878.1889.1958.2072.2253.2299.2373.2415.2506.2526.2531.2568.2571.2575.2624.2677.2778~dv.%22%2C%228CD19A2C-3536-4595-BE61-F4ED90E408CF%22%5D%5D; _cc_id=57a4746fe6de823e7de2122b954470ff; panoramaId_expiry=1758799888113; panoramaId=968a74af8bfaa249ecfc0db383a5185ca02c818c2c59ce57a7dba85fbb473827; panoramaIdType=panoDevice; cto_bundle=yhjAel92eHU3R0N4TUdkUkdjQyUyRkt3c01LMzNrVmFpdktiRndoejkydkZMeXl2SGQlMkZkMlFKMmtveFdyV3V5T1RhOE9aTUJvMGNIN3V6NGVpUE9WZEhoN2xmWm1iVUVFUUo1b2klMkIwdk9hSXlOeWU4WUE5T29ic0M2WWgzQ1dTRUUlMkZ4VTA3aDhqYUg1dGVkVlNKWFlJZ0NxYTVscGVMNVM5RmlCeDJOR0R5Q0JrR1lUUiUyQlhxZVdTbVdBY28wMUJvMzhCaGIzc296OGxIYVExeGRYZ2sxS0RXRmxGajdBTWd6VXpEbTgxWklsb0RTUEU2R1hZQmV1cDNUejB3QTdhc1dEJTJCcHQw; __gads=ID=b0eb60bd853f35e2:T=1741972772:RT=1758558086:S=ALNI_MaFzrmYuelO3pprCcE-X11dtglRQQ; __gpi=UID=0000105ebfc6a7e0:T=1741972772:RT=1758558086:S=ALNI_MZbqzSPqpShWfDTeKVGbiopFDYA7Q; __eoi=ID=e3049f53ec97892f:T=1757590507:RT=1758558086:S=AA-AfjZ0Xx3YKnFcP1oXOle3Tgms; _giq=1e41fe5768d1784a5703; _ga_775JE7WC13=GS2.1.s1758554581$o31$g1$t1758558282$j60$l0$h0; FCNEC=%5B%5B%22AKsRol_eEs3J4Ny7eWY_dq2sq1-pg69bcR4o9yh-mtBl36fPxTfEakBQvY43r7orrDaS-0R3mVT-LMs9ldNIhitVluBUn7MNnTa_MoCxT7DiTtmMXbfXm8MtR_5XXQDGyVp2zysz2e8pOBZAjs-7bWRWivSL7ZAchg%3D%3D%22%5D%5D'
+            }
+
+            # Update session headers with enhanced headers
+            self.session.headers.update(enhanced_headers)
+
             response = self.session.get(self.format_word_url(word), timeout=10)
             response.raise_for_status()
 
-            soup = BeautifulSoup(response.content, 'html.parser')
+            # Ensure proper UTF-8 encoding for Polish characters
+            response.encoding = 'utf-8'
+
+            soup = BeautifulSoup(response.content, 'html.parser', from_encoding='utf-8')
             return ( self._parse_declension_table(soup, 1),
                      self._parse_declension_table(soup, 2) )
 
@@ -399,14 +187,16 @@ class PolishDeclensionScraper:
 
         return DeclensionResult(**declension_data)
 
-    def format_word_url(self, word: str) -> Optional[DeclensionResult]:
+    def format_word_url(self, word: str) -> str:
         """
-        Get declension for the word 'ludzie' from the specific URL
+        Get URL for the word with proper URL encoding for Polish characters
 
         Returns:
-            DeclensionResult object or None if scraping fails
+            URL string with properly encoded Polish characters
         """
-        return f"https://odmiana.net/odmiana-przez-przypadki-rzeczownika-{word}"
+        from urllib.parse import quote
+        encoded_word = quote(word.encode('utf-8'))
+        return f"https://odmiana.net/odmiana-przez-przypadki-rzeczownika-{encoded_word}"
 
     def format_declension_result(self, result: DeclensionResult) -> Dict[str, str]:
         """
@@ -457,8 +247,8 @@ if __name__ == "__main__":
 
     # Check how many words are already in database
     existing_words = db.query(Noun.word).all()
-    existing_word_set = {word[0] for word in existing_words}
-    words_to_scrape = [word for word in words if word not in existing_word_set]
+    existing_word_set = {word[0].lower() for word in existing_words}
+    words_to_scrape = [word for word in words if word.lower() not in existing_word_set]
     words_already_exist = len(words) - len(words_to_scrape)
 
     logger.info(f"Words already in database: {words_already_exist}")
@@ -471,11 +261,11 @@ if __name__ == "__main__":
     skipped_count = 0
 
     try:
-        for word in words:
+        for word in words_to_scrape:
             processed_count += 1
 
-            # Check if word already exists in database
-            existing_noun = db.query(Noun).filter(Noun.word == word).first()
+            # Check if word already exists in database (case-insensitive)
+            existing_noun = db.query(Noun).filter(Noun.word.ilike(word)).first()
             if existing_noun:
                 logger.info(f"SKIPPED: Word '{word}' already exists in database (ID: {existing_noun.id})")
                 skipped_count += 1
