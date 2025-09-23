@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import List, Dict, Union
 
@@ -25,14 +26,14 @@ async def get_dopelniacz_exercise(
     Returns all nouns from the database with their genitive forms.
     """
     # Get all nouns from the database
-    nouns = db.query(Noun).all()
+    nouns = db.query(Noun).order_by(func.random()).limit(50).all()
 
     exercise_items = []
     for noun in nouns:
         # Extract dopełniacz from cases_pojed (singular cases)
         dopelniacz = ""
-        if noun.cases_pojed and isinstance(noun.cases_pojed, dict):
-            dopelniacz = noun.cases_pojed.get("dopełniacz", "")
+        if noun.cases_mnoga and isinstance(noun.cases_mnoga, dict):
+            dopelniacz = noun.cases_mnoga.get("dopełniacz", "")
 
         exercise_items.append({
             "id": str(noun.id),
