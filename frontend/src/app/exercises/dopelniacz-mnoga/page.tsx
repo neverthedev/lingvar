@@ -29,7 +29,8 @@ interface WordState extends Word {
 export default function DopelniaczExercisePage() {
   const { isAuthenticated, isLoading } = useAuth()
   const router = useRouter()
-  const exerciseId = 'dopelniacz' // Hardcoded for this specific exercise
+  const exerciseId = 'dopelniacz-mnoga' // Hardcoded for this specific exercise
+  const exerciseUrl = 'dopelniacz/mnoga'
 
   const [exercise, setExercise] = useState<Exercise | null>(null)
   const [words, setWords] = useState<WordState[]>([])
@@ -53,7 +54,7 @@ export default function DopelniaczExercisePage() {
     try {
       setExerciseLoading(true)
 
-      const response = await fetch(`${API_ENDPOINTS.exercises}${exerciseId}`, {
+      const response = await fetch(`${API_ENDPOINTS.exercises}${exerciseUrl}`, {
         method: 'GET',
         headers: AuthService.getAuthHeaders()
       })
@@ -80,7 +81,7 @@ export default function DopelniaczExercisePage() {
     try {
       setWordsLoading(true)
 
-      const response = await fetch(`${API_ENDPOINTS.exercises}${exerciseId}`, {
+      const response = await fetch(`${API_ENDPOINTS.exercises}${exerciseUrl}`, {
         method: 'GET',
         headers: AuthService.getAuthHeaders()
       })
