@@ -96,6 +96,7 @@ export default function SingularNounsLesson() {
         cases={cases}
         title="Singular Nouns Declension"
         description="Click on any case cell to fill in the correct form. You have 3 attempts per cell."
+        wordType="noun"
       />
 
       <LessonNavigation

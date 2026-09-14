@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -24,7 +24,6 @@ class Pronoun(Base):
     cases = Column(JSONB, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
 class Verb(Base):
     __tablename__ = "verbs"
 
@@ -57,3 +56,19 @@ class Rule(Base):
     # Self-referencing relationship for subrules
     parent_rule = relationship("Rule", remote_side=[id], back_populates="subrules")
     subrules = relationship("Rule", back_populates="parent_rule", order_by="Rule.ordering")
+
+class WordTestStat(Base):
+    __tablename__ = "word_test_stats"
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True, index=True)
+    word_type = Column(String(50), primary_key=True, index=True)
+    word_id = Column(Integer, primary_key=True, index=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    correct = Column(Integer, nullable=False, default=0)
+    weight = Column(Integer, nullable=False, default=0)
+    last_tested_at = Column(DateTime(timezone=True))
+    last_correct = Column(Boolean)
+
+    __table_args__ = (
+        Index("idx_word_test_stats_user", "user_id"),
+    )

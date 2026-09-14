@@ -15,6 +15,10 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
+# Szef życzy wam, żebyście wejśli szybko na rynek
+# Koleżanka życzy im, żeby nie jedli za dużo
+# Tata życzy mu, żeby myślił nie tylko o sobie
+# https://wordwall.net/resource/97784670/polish/mianownik-liczby-mnogiej-niem%C4%99skoosobowe-formy
 @router.get("/mnoga", response_model=List[Dict[str, Union[str, int]]])
 async def get_mianownik_mnoga_exercise(
     current_user: DBUser = Depends(get_current_active_user),

@@ -1,5 +1,6 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Typography, Button, Icon } from '../atoms'
+import { AuthService, API_ENDPOINTS } from '@/lib/api'
 
 interface CaseColumn {
   key: string
@@ -24,17 +25,122 @@ interface InteractiveLessonTableProps {
   cases: CaseColumn[]
   title?: string
   description?: string
+  wordType?: string
 }
 
 export const InteractiveLessonTable: React.FC<InteractiveLessonTableProps> = ({
   data,
   cases,
   title = "Interactive Exercise",
-  description = "Click on any case cell to fill in the correct form. You have 3 attempts per cell."
+  description = "Click on any case cell to fill in the correct form. You have 3 attempts per cell.",
+  wordType
 }) => {
   const [cellStates, setCellStates] = useState<Record<string, CellState>>({})
   const [inputValues, setInputValues] = useState<Record<string, string>>({})
   const [attempts, setAttempts] = useState<Record<string, number>>({})
+  const [completedWords, setCompletedWords] = useState<Record<number, boolean>>({})
+  const [weights, setWeights] = useState<Record<number, number>>({})
+
+  useEffect(() => {
+    if (!data || data.length === 0) {
+      return
+    }
+    setWeights(prev => {
+      const next = { ...prev }
+      data.forEach(item => {
+        if (typeof item.weight === 'number' && next[item.id] === undefined) {
+          next[item.id] = item.weight
+        }
+      })
+      return next
+    })
+  }, [data])
+
+  const sendAttempt = async (wordId: number, isCorrect: boolean) => {
+    if (!wordType) {
+      return
+    }
+    try {
+      const response = await fetch(API_ENDPOINTS.testsAttempt, {
+        method: 'POST',
+        headers: AuthService.getAuthHeaders(),
+        body: JSON.stringify({
+          word_type: wordType,
+          word_id: wordId,
+          is_correct: isCorrect
+        })
+      })
+      if (response.status === 401) {
+        AuthService.clearTokens()
+      }
+    } catch (err) {
+      console.error('Failed to send attempt:', err)
+    }
+  }
+
+  const sendComplete = async (wordId: number, allCorrect: boolean) => {
+    if (!wordType) {
+      return
+    }
+    try {
+      const response = await fetch(API_ENDPOINTS.testsComplete, {
+        method: 'POST',
+        headers: AuthService.getAuthHeaders(),
+        body: JSON.stringify({
+          word_type: wordType,
+          word_id: wordId,
+          all_correct: allCorrect
+        })
+      })
+      if (response.status === 401) {
+        AuthService.clearTokens()
+      }
+    } catch (err) {
+      console.error('Failed to send completion:', err)
+    }
+  }
+
+  const sendWeight = async (wordId: number, direction: 'up' | 'down') => {
+    if (!wordType) {
+      return
+    }
+    try {
+      const response = await fetch(API_ENDPOINTS.testsWeight, {
+        method: 'POST',
+        headers: AuthService.getAuthHeaders(),
+        body: JSON.stringify({
+          word_type: wordType,
+          word_id: wordId,
+          direction
+        })
+      })
+      if (response.status === 401) {
+        AuthService.clearTokens()
+        return
+      }
+      if (response.ok) {
+        const payload = await response.json()
+        if (typeof payload?.weight === 'number') {
+          setWeights(prev => ({ ...prev, [wordId]: payload.weight }))
+        }
+      }
+    } catch (err) {
+      console.error('Failed to send weight update:', err)
+    }
+  }
+
+  const maybeCompleteWord = (itemId: number, nextStates: Record<string, CellState>) => {
+    if (completedWords[itemId]) {
+      return
+    }
+    const allDone = cases.every((case_) => nextStates[`${itemId}-${case_.key}`]?.showAnswer)
+    if (!allDone) {
+      return
+    }
+    const allCorrect = cases.every((case_) => nextStates[`${itemId}-${case_.key}`]?.isCorrect)
+    setCompletedWords(prev => ({ ...prev, [itemId]: true }))
+    void sendComplete(itemId, allCorrect)
+  }
 
   // Handle cell click
   const handleCellClick = (itemId: number, caseKey: string) => {
@@ -86,20 +192,26 @@ export const InteractiveLessonTable: React.FC<InteractiveLessonTableProps> = ({
   // Handle OK button click
   const handleOk = (item: TableData, caseKey: string) => {
     const cellKey = `${item.id}-${caseKey}`
-    const inputValue = inputValues[cellKey]?.trim().toLowerCase()
-    const correctValue = item[caseKey as keyof typeof item]?.toString().toLowerCase()
+    const inputRaw = inputValues[cellKey] ?? ''
+    const inputValue = inputRaw.trim().toLowerCase()
+    const correctValue = (item[caseKey as keyof typeof item] ?? '').toString().toLowerCase()
+    const isCorrect = inputValue === correctValue
 
-    if (inputValue === correctValue) {
+    void sendAttempt(item.id, isCorrect)
+
+    if (isCorrect) {
       // Correct answer
-      setCellStates(prev => ({
-        ...prev,
+      const nextStates = {
+        ...cellStates,
         [cellKey]: {
           isEditing: false,
           isCorrect: true,
           showAnswer: true,
           answer: item[caseKey as keyof typeof item]?.toString()
         }
-      }))
+      }
+      setCellStates(nextStates)
+      maybeCompleteWord(item.id, nextStates)
       setInputValues(prev => ({ ...prev, [cellKey]: '' }))
       setAttempts(prev => ({ ...prev, [cellKey]: 0 }))
     } else {
@@ -109,15 +221,17 @@ export const InteractiveLessonTable: React.FC<InteractiveLessonTableProps> = ({
 
       if (newAttempts >= 3) {
         // Show correct answer after 3 attempts
-        setCellStates(prev => ({
-          ...prev,
+        const nextStates = {
+          ...cellStates,
           [cellKey]: {
             isEditing: false,
             isCorrect: false,
             showAnswer: true,
             answer: item[caseKey as keyof typeof item]?.toString()
           }
-        }))
+        }
+        setCellStates(nextStates)
+        maybeCompleteWord(item.id, nextStates)
         setInputValues(prev => ({ ...prev, [cellKey]: '' }))
         setAttempts(prev => ({ ...prev, [cellKey]: 0 }))
       } else {
@@ -264,7 +378,38 @@ export const InteractiveLessonTable: React.FC<InteractiveLessonTableProps> = ({
               <tr key={item.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                 {/* Fixed Word Column */}
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 sticky left-0 bg-inherit z-10 border-r">
-                  {item.word}
+                  <div className="flex items-center justify-between gap-3">
+                    <span>{item.word}</span>
+                    {wordType && (
+                      <div className="flex flex-col items-center">
+                        <button
+                          type="button"
+                          className="text-blue-500 hover:text-blue-700"
+                          title="Increase priority"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void sendWeight(item.id, 'up')
+                          }}
+                        >
+                          <Icon name="triangle-up" size="sm" />
+                        </button>
+                        <div className="text-[10px] text-gray-600 leading-none my-0.5">
+                          {weights[item.id] ?? (typeof item.weight === 'number' ? item.weight : 0)}
+                        </div>
+                        <button
+                          type="button"
+                          className="text-blue-500 hover:text-blue-700 mt-1"
+                          title="Decrease priority"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void sendWeight(item.id, 'down')
+                          }}
+                        >
+                          <Icon name="triangle-down" size="sm" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </td>
 
                 {/* Case Columns */}

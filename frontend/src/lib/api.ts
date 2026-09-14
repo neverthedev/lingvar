@@ -14,7 +14,10 @@ export const API_ENDPOINTS = {
   nounsSingle: `${API_BASE_URL}/api/nouns/single`,
   pronouns: `${API_BASE_URL}/api/pronouns/`,
   verbs: `${API_BASE_URL}/api/verbs/`,
-  exercises: `${API_BASE_URL}/api/exercises/`
+  exercises: `${API_BASE_URL}/api/exercises/`,
+  testsAttempt: `${API_BASE_URL}/api/tests/attempt`,
+  testsComplete: `${API_BASE_URL}/api/tests/complete`,
+  testsWeight: `${API_BASE_URL}/api/tests/weight`
 }
 
 // Types based on the API documentation

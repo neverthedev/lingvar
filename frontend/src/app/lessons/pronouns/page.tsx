@@ -97,6 +97,7 @@ export default function PronounsLesson() {
         cases={cases}
         title="Pronouns Declension"
         description="Click on any case cell to fill in the correct form. You have 3 attempts per cell."
+        wordType="pronoun"
       />
 
       <LessonNavigation

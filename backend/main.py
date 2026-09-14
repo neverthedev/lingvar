@@ -5,7 +5,7 @@ import uvicorn
 import os
 
 from services.database import create_tables, test_connection
-from routers import users, nouns, pronouns, verbs, misc
+from routers import users, nouns, pronouns, verbs, misc, tests
 from routers.admin import main as admin
 from routers.exercises import main as exercises
 
@@ -52,6 +52,7 @@ app.include_router(users.router)
 app.include_router(nouns.router)
 app.include_router(pronouns.router)
 app.include_router(verbs.router)
+app.include_router(tests.router)
 app.include_router(misc.router)
 app.include_router(exercises.router)
 app.include_router(admin.router)

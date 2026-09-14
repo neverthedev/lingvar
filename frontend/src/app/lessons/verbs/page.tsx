@@ -29,8 +29,8 @@ export default function VerbsLesson() {
   // Personal pronouns configuration
   const cases = [
     { key: 'ja', name: 'Ja' },
-    { key: 'ty', name: 'Ty' },
     { key: 'ono', name: 'On/Ona/Ono' },
+    { key: 'ty', name: 'Ty' },
     { key: 'my', name: 'My' },
     { key: 'wy', name: 'Wy' },
     { key: 'one', name: 'Oni/One' }
@@ -96,6 +96,7 @@ export default function VerbsLesson() {
         cases={cases}
         title="Verb Conjugation"
         description="Click on any conjugation cell to fill in the correct form. You have 3 attempts per cell."
+        wordType="verb"
       />
 
       <LessonNavigation
