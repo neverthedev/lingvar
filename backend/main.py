@@ -2,29 +2,23 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
-import os
 
-from services.database import create_tables, test_connection
+from services import migrations
 from routers import users, nouns, pronouns, verbs, misc, tests
 from routers.admin import main as admin
 from routers.exercises import main as exercises
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    print("Starting up...")
-    print(f"Database URL: {os.getenv('DATABASE_URL', 'sqlite:///./lingvar.db')}")
-    if test_connection():
-        print("Database connection successful!")
-        create_tables()
-        print("Database tables created/verified!")
-    else:
-        print("Database connection failed!")
+    try:
+        migrations.check()
+    except Exception as error:
+        raise RuntimeError(
+            "Database migrations are unavailable or not current. "
+            "Run `python -m migrate upgrade` before starting the backend."
+        ) from error
 
     yield
-
-    # Shutdown (if needed)
-    print("Shutting down...")
 
 app = FastAPI(
     title="Lingvar Backend API",
