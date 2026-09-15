@@ -51,9 +51,7 @@ def _alembic_downgrade(database_url: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _assert_startup_rejected() -> None:
-    from main import app
-
+def _assert_startup_rejected(app) -> None:
     with pytest.raises(RuntimeError, match="Database migrations are unavailable or not current"):
         with TestClient(app):
             pass
@@ -71,10 +69,12 @@ def _application_tables(engine) -> set[str]:
         )
 
 
-def test_initial_migration_lifecycle_and_existing_api(test_engine, test_database_url):
+def test_initial_migration_lifecycle(test_engine, test_database_url):
     """A fresh database is usable only after the explicit migration command."""
     assert _migration_command("check", test_database_url).returncode != 0
-    _assert_startup_rejected()
+    from main import app
+
+    _assert_startup_rejected(app)
     assert _application_tables(test_engine) == set(), "startup must not call create_all"
 
     upgrade = _migration_command("upgrade", test_database_url)
@@ -88,99 +88,16 @@ def test_initial_migration_lifecycle_and_existing_api(test_engine, test_database
     assert _application_tables(test_engine) == APPLICATION_TABLES
     assert _migration_command("check", test_database_url).returncode == 0
 
-    from main import app
-
-    with test_engine.begin() as connection:
-        connection.execute(
-            text(
-                "INSERT INTO nouns (word, cases_pojed, cases_mnoga, cases_menska) "
-                "VALUES (:word, CAST(:singular AS jsonb), CAST(:plural AS jsonb), CAST(:masculine AS jsonb))"
-            ),
-            {
-                "word": "kot-qa",
-                "singular": '{"mianownik": "kot-qa"}',
-                "plural": '{"mianownik": "koty-qa"}',
-                "masculine": '{"mianownik": "koty-qa"}',
-            },
-        )
-
     with TestClient(app) as client:
         assert client.get("/api/health").json()["database"] == "connected"
-        registration_payload = {
-            "username": "migration-qa",
-            "email": "migration-qa@example.com",
-            "password": "safe-password-8",
-        }
-        registration = client.post(
-            "/users/register",
-            json=registration_payload,
-        )
-        assert registration.status_code == 200, registration.text
-        assert registration.json()["username"] == registration_payload["username"]
-        assert registration.json()["email"] == registration_payload["email"]
-
-        duplicate_registration = client.post("/users/register", json=registration_payload)
-        assert duplicate_registration.status_code == 400, duplicate_registration.text
-        assert duplicate_registration.json() == {"detail": "Username or email already registered"}
-
-        with test_engine.connect() as connection:
-            registered_user_count = connection.execute(
-                text(
-                    "SELECT count(*) FROM users "
-                    "WHERE username = :username AND email = :email"
-                ),
-                registration_payload,
-            ).scalar_one()
-        assert registered_user_count == 1
-
-        token_response = client.post(
-            "/users/token", data={"username": "migration-qa", "password": "safe-password-8"}
-        )
-        assert token_response.status_code == 200, token_response.text
-        authorization = {"Authorization": f"Bearer {token_response.json()['access_token']}"}
-
-        nouns = client.get("/api/nouns/single", headers=authorization)
-        assert nouns.status_code == 200, nouns.text
-        noun = next(item for item in nouns.json() if item["word"] == "kot-qa")
-
-        assert client.post(
-            "/api/tests/attempt",
-            headers=authorization,
-            json={"word_type": "noun", "word_id": noun["id"], "is_correct": True},
-        ).json() == {"ok": True}
-        assert client.post(
-            "/api/tests/complete",
-            headers=authorization,
-            json={"word_type": "noun", "word_id": noun["id"], "all_correct": True},
-        ).json() == {"ok": True}
-        weight = client.post(
-            "/api/tests/weight",
-            headers=authorization,
-            json={"word_type": "noun", "word_id": noun["id"], "direction": "up"},
-        )
-        assert weight.json() == {"ok": True, "weight": 1}
-
-    with test_engine.connect() as connection:
-        stat = connection.execute(
-            text(
-                "SELECT attempts, correct, weight, last_correct, last_tested_at "
-                "FROM word_test_stats WHERE word_type = 'noun' AND word_id = :word_id"
-            ),
-            {"word_id": noun["id"]},
-        ).mappings().one()
-    assert stat["attempts"] == 1
-    assert stat["correct"] == 1
-    assert stat["weight"] == 1
-    assert stat["last_correct"] is True
-    assert stat["last_tested_at"] is not None
 
     with test_engine.begin() as connection:
         connection.execute(text("DELETE FROM alembic_version"))
-    _assert_startup_rejected()
+    _assert_startup_rejected(app)
 
     with test_engine.begin() as connection:
         connection.execute(text("INSERT INTO alembic_version (version_num) VALUES (:revision)"), {"revision": "unknown_revision"})
-    _assert_startup_rejected()
+    _assert_startup_rejected(app)
 
     with test_engine.begin() as connection:
         connection.execute(text("UPDATE alembic_version SET version_num = :revision"), {"revision": INITIAL_REVISION})
@@ -194,11 +111,15 @@ def test_initial_migration_lifecycle_and_existing_api(test_engine, test_database
 
 
 def test_startup_rejects_unavailable_database(test_database_url):
-    unavailable = make_url(test_database_url).set(database="lingvar_task001_missing")
+    # Import after the autouse fixture selected the dedicated URL, then change
+    # only the runtime migration target for this negative lifecycle assertion.
+    from main import app
+
+    unavailable = make_url(test_database_url).set(database="lingvar_missing_test")
     previous = os.environ["DATABASE_URL"]
     os.environ["DATABASE_URL"] = str(unavailable)
     try:
-        _assert_startup_rejected()
+        _assert_startup_rejected(app)
     finally:
         os.environ["DATABASE_URL"] = previous
 

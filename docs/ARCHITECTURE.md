@@ -196,16 +196,21 @@ DDL на время baseline исключается эксплуатационн
 адреса frontend.
 
 [docker-compose.test.yml](../docker-compose.test.yml) задаёт отдельный project
-`lingvar-migration-tests` с PostgreSQL 15 на tmpfs, без host-порта и без
-подключения `database/data`. Команды в [README](../README.md) указывают явный
-`-p lingvar-migration-tests`; cleanup не затрагивает штатный project.
-[backend/tests/conftest.py](../backend/tests/conftest.py) требует отдельный
-`TEST_DATABASE_URL` и проверяет подключённое имя и версию БД перед тестовым DDL.
-[Интеграционные тесты](../backend/tests/test_migrations.py) вызывают CLI в
-subprocess, запускают настоящий FastAPI lifespan через TestClient и проверяют
-новую БД, повторное применение initial, старт до/после миграции, действующий
-API пользователя (включая отказ повторной регистрации без второго пользователя),
-слов/статистики и отказ downgrade initial. Переход прежней
-схемы проверяется вручную на отдельной PostgreSQL с синтетическими данными;
-legacy-автотестов нет. В [frontend/package.json](../frontend/package.json)
-нет test-скрипта; отдельного браузерного контура в этой задаче нет.
+`lingvar-tests` с PostgreSQL 15, БД `lingvar_test` и пользователем
+`lingvar_test_user` на tmpfs, без host-порта и без
+подключения `database/data`, штатной сети и учётных данных. Команды в
+[README](../README.md) указывают явный `-p lingvar-tests`; cleanup
+не затрагивает штатный project. [Общие фикстуры](../backend/tests/conftest.py)
+требуют `TEST_DATABASE_URL` с выделенными PostgreSQL, host, пользователем и
+именем БД, проверяют фактически подключённые имя/пользователя и версию 15 до
+DDL, назначают backend тот же URL и очищают `public` до/после каждого теста.
+[Тесты миграций](../backend/tests/test_migrations.py) вызывают CLI в subprocess,
+запускают FastAPI lifespan через TestClient и проверяют пустую/обновлённую
+схему, повторный initial, отказ старта без миграции и запрет downgrade/stamp.
+[HTTP-сценарии](../backend/tests/test_user_workflow.py) отдельно проверяют путь
+регистрация → вход → авторизованная выдача слова → сохранение агрегата
+`word_test_stats` и отказ повторной регистрации. Они явно применяют Alembic
+перед запросами, создают только синтетические данные и читают сохранённый
+результат в тестовой PostgreSQL.
+В [frontend/package.json](../frontend/package.json) нет test-скрипта;
+браузерного раннера пока нет.

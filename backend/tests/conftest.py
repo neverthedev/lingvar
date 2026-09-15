@@ -8,7 +8,9 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, make_url
 
 
-TEST_DATABASE_NAME = "lingvar_task001_test"
+TEST_DATABASE_NAME = "lingvar_test"
+TEST_DATABASE_HOST = "postgres-test"
+TEST_DATABASE_USER = "lingvar_test_user"
 
 
 def _test_database_url() -> URL:
@@ -17,9 +19,15 @@ def _test_database_url() -> URL:
         pytest.exit("TEST_DATABASE_URL must be explicitly set before running integration tests.")
 
     url = make_url(raw_url)
-    if url.get_backend_name() != "postgresql" or url.database != TEST_DATABASE_NAME:
+    if (
+        url.get_backend_name() != "postgresql"
+        or url.database != TEST_DATABASE_NAME
+        or url.host != TEST_DATABASE_HOST
+        or url.username != TEST_DATABASE_USER
+    ):
         pytest.exit(
-            "TEST_DATABASE_URL must point to the dedicated PostgreSQL database "
+            "TEST_DATABASE_URL must point to the dedicated PostgreSQL test service "
+            f"{TEST_DATABASE_HOST!r} as {TEST_DATABASE_USER!r} using database "
             f"{TEST_DATABASE_NAME!r}; refusing any DDL."
         )
     return url
@@ -28,9 +36,16 @@ def _test_database_url() -> URL:
 def _reset_public_schema(engine) -> None:
     with engine.begin() as connection:
         database_name = connection.execute(text("SELECT current_database()")).scalar_one()
+        current_user = connection.execute(text("SELECT current_user")).scalar_one()
         version = int(connection.execute(text("SHOW server_version_num")).scalar_one())
-        if database_name != TEST_DATABASE_NAME or not 150000 <= version < 160000:
-            pytest.exit("Refusing DDL outside the dedicated PostgreSQL 15 test database.")
+        if (
+            database_name != TEST_DATABASE_NAME
+            or current_user != TEST_DATABASE_USER
+            or not 150000 <= version < 160000
+        ):
+            pytest.exit(
+                "Refusing DDL outside the dedicated PostgreSQL 15 test database and user."
+            )
         connection.execute(text("DROP SCHEMA public CASCADE"))
         connection.execute(text("CREATE SCHEMA public"))
 
@@ -41,7 +56,7 @@ def test_database_url() -> str:
     return _test_database_url().render_as_string(hide_password=False)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function", autouse=True)
 def test_engine(test_database_url):
     engine = create_engine(test_database_url, pool_pre_ping=True)
     _reset_public_schema(engine)
@@ -53,7 +68,7 @@ def test_engine(test_database_url):
 
 
 @pytest.fixture(scope="session", autouse=True)
-def configure_backend_database(test_database_url, test_engine):
+def configure_backend_database(test_database_url):
     """Never inherit DATABASE_URL from .env or the ordinary Compose project."""
     previous = os.environ.get("DATABASE_URL")
     os.environ["DATABASE_URL"] = test_database_url
