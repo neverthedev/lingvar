@@ -100,20 +100,48 @@ export class AuthService {
 // API call functions
 export class ApiService {
   static async register(userData: UserCreate): Promise<UserResponse> {
-    const response = await fetch(API_ENDPOINTS.register, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(userData)
-    })
+    let response: Response
 
-    if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(errorData.detail || 'Registration failed')
+    try {
+      response = await fetch(API_ENDPOINTS.register, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(userData)
+      })
+    } catch {
+      throw new Error('Unable to reach the registration service. Please try again later.')
     }
 
-    return response.json()
+    if (!response.ok) {
+      let detail: unknown
+
+      try {
+        const errorData: unknown = await response.json()
+        if (typeof errorData === 'object' && errorData !== null && 'detail' in errorData) {
+          detail = errorData.detail
+        }
+      } catch {
+        // Use the user-facing fallback below for non-JSON error responses.
+      }
+
+      if (detail === 'Username or email already registered') {
+        throw new Error('This username or email is already registered.')
+      }
+
+      if (typeof detail === 'string' && detail.trim()) {
+        throw new Error(detail)
+      }
+
+      throw new Error('We could not create your account. Please check your details and try again.')
+    }
+
+    try {
+      return await response.json()
+    } catch {
+      throw new Error('The registration service returned an invalid response. Please try signing in or try again later.')
+    }
   }
 
   static async login(credentials: LoginCredentials): Promise<Token> {
