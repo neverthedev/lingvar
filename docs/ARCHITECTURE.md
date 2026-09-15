@@ -67,8 +67,11 @@ Refresh-токена и серверной сессии нет. Учебные A
 
 [Роутер users](../backend/routers/users.py) также предоставляет
 `POST /users/register` и список пользователей для авторизованного ученика.
-Важное текущее несоответствие: [страница signup](../frontend/src/app/signup/page.tsx)
-отправляет запрос на `/register`, которого подключённый backend не предоставляет.
+[Страница signup](../frontend/src/app/signup/page.tsx) отправляет
+`username`, `email`, `password` через [ApiService.register](../frontend/src/lib/api.ts)
+на этот endpoint. При успехе она переходит на `/login` с подтверждением,
+которое показывает форма входа; автоматического входа после регистрации нет.
+При ошибке регистрации форма показывает сообщение и сохраняет введённые поля.
 [Frontend middleware](../frontend/middleware.ts) проверяет cookies/Authorization
 для `/dashboard`, `/profile`, `/settings`; эти маршруты отсутствуют, а штатный
 вход сохраняет токен только в `localStorage`. Защита учебного API осуществляется
@@ -201,7 +204,8 @@ DDL на время baseline исключается эксплуатационн
 [Интеграционные тесты](../backend/tests/test_migrations.py) вызывают CLI в
 subprocess, запускают настоящий FastAPI lifespan через TestClient и проверяют
 новую БД, повторное применение initial, старт до/после миграции, действующий
-API пользователя/слов/статистики и отказ downgrade initial. Переход прежней
+API пользователя (включая отказ повторной регистрации без второго пользователя),
+слов/статистики и отказ downgrade initial. Переход прежней
 схемы проверяется вручную на отдельной PostgreSQL с синтетическими данными;
 legacy-автотестов нет. В [frontend/package.json](../frontend/package.json)
 нет test-скрипта; отдельного браузерного контура в этой задаче нет.

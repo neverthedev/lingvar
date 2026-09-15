@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { AuthLayout, SignupForm } from '@/components'
+import { ApiService } from '@/lib/api'
 
 export default function SignupPage() {
   const [error, setError] = useState('')
@@ -14,23 +15,10 @@ export default function SignupPage() {
     setError('')
 
     try {
-      const response = await fetch('http://localhost:8000/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data)
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || 'Registration failed')
-      }
-
-      // Redirect to login with success message
+      await ApiService.register(data)
       router.push('/login?message=Account created successfully! Please sign in.')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred')
+      setError(err instanceof Error ? err.message : 'We could not create your account. Please try again.')
     } finally {
       setIsLoading(false)
     }

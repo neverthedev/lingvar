@@ -106,11 +106,32 @@ def test_initial_migration_lifecycle_and_existing_api(test_engine, test_database
 
     with TestClient(app) as client:
         assert client.get("/api/health").json()["database"] == "connected"
+        registration_payload = {
+            "username": "migration-qa",
+            "email": "migration-qa@example.com",
+            "password": "safe-password-8",
+        }
         registration = client.post(
             "/users/register",
-            json={"username": "migration-qa", "email": "migration-qa@example.com", "password": "safe-password-8"},
+            json=registration_payload,
         )
         assert registration.status_code == 200, registration.text
+        assert registration.json()["username"] == registration_payload["username"]
+        assert registration.json()["email"] == registration_payload["email"]
+
+        duplicate_registration = client.post("/users/register", json=registration_payload)
+        assert duplicate_registration.status_code == 400, duplicate_registration.text
+        assert duplicate_registration.json() == {"detail": "Username or email already registered"}
+
+        with test_engine.connect() as connection:
+            registered_user_count = connection.execute(
+                text(
+                    "SELECT count(*) FROM users "
+                    "WHERE username = :username AND email = :email"
+                ),
+                registration_payload,
+            ).scalar_one()
+        assert registered_user_count == 1
 
         token_response = client.post(
             "/users/token", data={"username": "migration-qa", "password": "safe-password-8"}
