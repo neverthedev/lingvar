@@ -40,6 +40,12 @@ export const Navigation: React.FC<NavigationProps> = ({
             <Link href="/" className="text-xl font-bold text-indigo-600">
               LingVar
             </Link>
+            {user?.is_superuser && (
+              <div className="ml-6 flex items-center gap-4 text-sm font-medium">
+                <Link href="/admin" className="text-gray-700 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">Администрирование</Link>
+                <Link href="/admin/rules" className="text-gray-700 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">Правила</Link>
+              </div>
+            )}
           </div>
 
           <UserMenu
