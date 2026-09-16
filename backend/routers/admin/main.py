@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from models.user import User
 from routers.exercises.catalog import EXERCISE_CATALOG
 from services.auth import get_current_admin_user
+from routers.admin import rules
 
 router = APIRouter(
     prefix="/admin",
@@ -14,6 +15,9 @@ router = APIRouter(
 class ExerciseMetadata(BaseModel):
     id: str
     title: str
+
+
+router.include_router(rules.router)
 
 
 @router.get("/exercises", response_model=list[ExerciseMetadata], tags=["admin"])

@@ -16,6 +16,7 @@ export const API_ENDPOINTS = {
   verbs: `${API_BASE_URL}/api/verbs/`,
   exercises: `${API_BASE_URL}/api/exercises/`,
   adminExercises: `${API_BASE_URL}/admin/exercises`,
+  adminRules: `${API_BASE_URL}/admin/rules`,
   testsAttempt: `${API_BASE_URL}/api/tests/attempt`,
   testsComplete: `${API_BASE_URL}/api/tests/complete`,
   testsWeight: `${API_BASE_URL}/api/tests/weight`
@@ -50,6 +51,21 @@ export interface LoginCredentials {
 export interface ExerciseMetadata {
   id: string
   title: string
+}
+
+export interface RuleNode {
+  id: number
+  title: string
+  description: string
+  parent_rule_id: number | null
+  ordering: number | null
+  children: RuleNode[]
+}
+
+export interface RulePayload {
+  title: string
+  description: string
+  parent_rule_id: number | null
 }
 
 // Authentication utilities
@@ -105,6 +121,36 @@ export class AuthService {
 
 // API call functions
 export class ApiService {
+  private static async adminRequest<T>(url: string, options: RequestInit, fallback: string): Promise<T> {
+    let response: Response
+    try {
+      response = await fetch(url, {
+        ...options,
+        headers: AuthService.getAuthHeaders(),
+      })
+    } catch {
+      throw new Error('The server is unavailable. Changes were not saved.')
+    }
+
+    if (!response.ok) {
+      const errorData: unknown = await response.json().catch(() => null)
+      const detail = errorData && typeof errorData === 'object' && 'detail' in errorData
+        ? errorData.detail
+        : null
+      throw new Error(typeof detail === 'string' && detail.trim() ? detail : fallback)
+    }
+
+    if (response.status === 204) {
+      return undefined as T
+    }
+
+    try {
+      return await response.json() as T
+    } catch {
+      throw new Error('The server returned an invalid response. Changes were not saved.')
+    }
+  }
+
   static async register(userData: UserCreate): Promise<UserResponse> {
     let response: Response
 
@@ -222,5 +268,29 @@ export class ApiService {
     }
 
     return response.json()
+  }
+
+  static getAdminRules(): Promise<RuleNode[]> {
+    return this.adminRequest<RuleNode[]>(API_ENDPOINTS.adminRules, { method: 'GET' }, 'Failed to fetch rules')
+  }
+
+  static createAdminRule(payload: RulePayload): Promise<RuleNode> {
+    return this.adminRequest<RuleNode>(API_ENDPOINTS.adminRules, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }, 'Unable to create rule. Changes were not saved.')
+  }
+
+  static updateAdminRule(ruleId: number, payload: RulePayload): Promise<RuleNode> {
+    return this.adminRequest<RuleNode>(`${API_ENDPOINTS.adminRules}/${ruleId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }, 'Unable to save rule. Changes were not saved.')
+  }
+
+  static deleteAdminRule(ruleId: number): Promise<void> {
+    return this.adminRequest<void>(`${API_ENDPOINTS.adminRules}/${ruleId}`, {
+      method: 'DELETE',
+    }, 'Unable to delete rule. Changes were not saved.')
   }
 }
