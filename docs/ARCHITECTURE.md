@@ -19,12 +19,16 @@ flowchart LR
     CLI[Явный CLI миграций] --> Alembic[Alembic revisions]
     Alembic --> PG
     CLI --> Reference[(Отдельная PostgreSQL БД эталона)]
+    AdminCLI[Явный CLI создания администратора] --> Auth
+    AdminCLI --> DB
     Next[Next.js: App Router и layout] --> Browser
 ```
 
 **Frontend.** [Next.js 14, React 18, TypeScript и Tailwind](../frontend/package.json).
 [App Router](../frontend/src/app/) задаёт реальные маршруты; корневой
-[layout](../frontend/src/app/layout.tsx) подключает `AuthProvider`.
+[layout](../frontend/src/app/layout.tsx) подключает `AuthProvider`, внутри которого
+[RoleRouteGuard](../frontend/src/components/RoleRouteGuard.tsx) разделяет учебные
+и административные экранные маршруты после восстановления пользователя.
 Страницы выполняют HTTP-запросы и хранят состояние упражнений в React.
 [Компоненты](../frontend/src/components/) разделены на atoms (контролы),
 molecules (формы, карточки), organisms (навигация, сетки, интерактивная таблица)
@@ -40,8 +44,9 @@ molecules (формы, карточки), organisms (навигация, сет�
 **Backend.** [main.py](../backend/main.py) создаёт FastAPI, CORS и подключает
 роутеры. Обработчики в [routers](../backend/routers/) совмещают HTTP-контракт,
 SQLAlchemy-запросы и преобразование ответа; отдельного учебного сервисного слоя
-нет. [services/auth.py](../backend/services/auth.py) отвечает за пароли, JWT
-и зависимости пользователя, [services/database.py](../backend/services/database.py)
+нет. [services/auth.py](../backend/services/auth.py) отвечает за пароли, JWT и
+зависимости активного пользователя, ученика и администратора;
+[services/database.py](../backend/services/database.py)
 — за engine и сессии. [services/migrations.py](../backend/services/migrations.py)
 и [migrate.py](../backend/migrate.py) управляют проверкой версии, явным upgrade
 и регистрацией существующей схемы. Перед `yield` lifespan проверяет, что
@@ -61,9 +66,13 @@ JWT HS256 с `sub=username`, сроком 30 минут. Frontend сохраня
 в `localStorage`, затем получает `GET /users/me`. При загрузке страницы контекст
 восстанавливает пользователя через этот же запрос; выход очищает локальный токен.
 Refresh-токена и серверной сессии нет. Учебные API требуют активного пользователя
-через зависимости авторизации. Учебные страницы и
-[LessonLayout](../frontend/src/components/templates/LessonLayout.tsx) перенаправляют
-на вход при отсутствии авторизации.
+без `is_superuser`, административный API — активного пользователя с этим
+признаком. После входа frontend направляет ученика на `/`, администратора — на
+`/admin`. Общий ролевой guard направляет неаутентифицированного посетителя
+защищённых страниц на вход, не показывает `/admin` ученику и возвращает
+администратора с остальных экранных маршрутов в `/admin`. Это клиентская граница
+навигации; окончательное разграничение учебных и административных данных выполняет
+backend.
 
 [Роутер users](../backend/routers/users.py) также предоставляет
 `POST /users/register` и список пользователей для авторизованного ученика.
@@ -108,7 +117,9 @@ Backend [nouns](../backend/routers/nouns.py) выдаёт 20 случайных 
 результаты таблиц записываются, но при их выдаче не используются.
 
 **Отдельные упражнения.** [Каталог exercises](../frontend/src/app/exercises/page.tsx)
-получает фиксированный список из [главного роутера](../backend/routers/exercises/main.py).
+получает фиксированный список из общего backend-
+[каталога](../backend/routers/exercises/catalog.py) через
+[главный роутер](../backend/routers/exercises/main.py).
 Подроутеры [dopełniacz](../backend/routers/exercises/dopelniacz.py) и
 [mianownik](../backend/routers/exercises/mianownik.py) выбирают по 50 случайных
 существительных, [numerators](../backend/routers/exercises/numerators.py) —
@@ -124,13 +135,13 @@ Backend [nouns](../backend/routers/nouns.py) выдаёт 20 случайных 
 сама страница использует реализованный путь. Это несоответствия контрактов,
 а не согласованный способ разделения данных и метаданных.
 
-**Прочие API.** [misc](../backend/routers/misc.py) содержит публичный health check
-и авторизованную проверку БД. [Admin router](../backend/routers/admin/main.py)
-подключает CRUD существительных, но его
-[зависимость](../backend/routers/admin/dependencies.py) обращается к отсутствующему
-`User.is_admin`, а [контракты nouns](../backend/routers/admin/nouns.py) —
-к отсутствующему `Noun.gender`. Этот код нельзя считать работоспособным
-административным контуром; фактический флаг привилегий модели — `is_superuser`.
+**Прочие API и административный контур.** [misc](../backend/routers/misc.py)
+содержит публичный health check и доступную только ученику проверку БД.
+[Admin router](../backend/routers/admin/main.py) предоставляет активному
+администратору `GET /admin/exercises`: проекцию общего каталога только с `id` и
+`title`, без заданий и адресов их выполнения. [Страница `/admin`](../frontend/src/app/admin/page.tsx)
+показывает эти строки без действий и имеет состояния загрузки, ошибки и пустого
+каталога. CRUD учебного содержания в административный контур не подключён.
 
 ## Данные и схема
 
@@ -162,6 +173,12 @@ Backend [nouns](../backend/routers/nouns.py) выдаёт 20 случайных 
 `upgrade`, `check`, `check-legacy`, `baseline`. Штатный порядок — явный `upgrade`
 до запуска backend; `create_all` из запуска и сервиса БД удалён.
 
+[create_admin.py](../backend/create_admin.py) — отдельная явно запускаемая команда:
+проверяет актуальность миграций, валидирует переданные имя, email и пароль,
+хеширует пароль и создаёт активного пользователя с `is_superuser=true` одной
+транзакцией. По умолчанию пароль читается скрыто с подтверждением; режим
+`--password-stdin` предназначен для управляемого неинтерактивного запуска.
+
 Для перехода legacy [validator](../backend/services/migrations.py) выполняет
 initial revision в отдельной пустой PostgreSQL `lingvar_migration_reference`
 в транзакции, снимает снимок `pg_catalog` и откатывает эталон. `check-legacy`
@@ -190,8 +207,9 @@ DDL на время baseline исключается эксплуатационн
 и Uvicorn с reload. [Образы](../backend/Dockerfile) используют Python 3.13;
 [frontend-образ](../frontend/Dockerfile) — Node 19.
 [requirements.txt](../backend/requirements.txt) задаёт Alembic и закрепляет
-`bcrypt==4.3.0` для совместимости текущего passlib API. `DATABASE_URL` обязателен
-и указывает PostgreSQL; SQLite fallback удалён. Модели используют JSONB,
+`bcrypt==4.0.1`, сохраняющий ожидаемые passlib 1.7.4 метаданные `__about__`.
+`DATABASE_URL` обязателен и указывает PostgreSQL; SQLite fallback удалён.
+Модели используют JSONB,
 ранжирование — PostgreSQL-выражения. CORS разрешает указанные в `main.py`
 адреса frontend.
 
@@ -207,10 +225,18 @@ DDL, назначают backend тот же URL и очищают `public` до/
 [Тесты миграций](../backend/tests/test_migrations.py) вызывают CLI в subprocess,
 запускают FastAPI lifespan через TestClient и проверяют пустую/обновлённую
 схему, повторный initial, отказ старта без миграции и запрет downgrade/stamp.
-[HTTP-сценарии](../backend/tests/test_user_workflow.py) отдельно проверяют путь
-регистрация → вход → авторизованная выдача слова → сохранение агрегата
-`word_test_stats` и отказ повторной регистрации. Они явно применяют Alembic
+[HTTP-сценарии](../backend/tests/test_user_workflow.py) проверяют путь регистрация
+→ вход → авторизованная выдача слова → сохранение агрегата `word_test_stats`,
+отказ повторной регистрации, создание администратора через настоящий CLI и
+разделение всех защищённых учебных/admin endpoints. Они явно применяют Alembic
 перед запросами, создают только синтетические данные и читают сохранённый
 результат в тестовой PostgreSQL.
-В [frontend/package.json](../frontend/package.json) нет test-скрипта;
-браузерного раннера пока нет.
+
+Сервис `browser-tests` собирается из [отдельного Dockerfile](../tests/browser/Dockerfile),
+сбрасывает только проверенную тестовую схему, поднимает backend и frontend внутри
+контейнера и запускает [Playwright-сценарий](../frontend/e2e/admin-access.spec.ts)
+в системном Chromium. Он проверяет вход и ролевую навигацию администратора и
+ученика поверх настоящих backend и PostgreSQL; конфигурация раннера находится в
+[playwright.config.ts](../frontend/playwright.config.ts). В `frontend/package.json`
+нет самостоятельного test-скрипта: штатная браузерная проверка запускается через
+сервис compose.

@@ -6,12 +6,12 @@ from sqlalchemy import func
 from services.database import get_db
 from models.vocabulary import WordTestStat
 from models.user import User as DBUser
-from services.auth import get_current_active_user
+from services.auth import get_current_student_user
 
 router = APIRouter(
     prefix="/api/tests",
     tags=["tests"],
-    dependencies=[Depends(get_current_active_user)],
+    dependencies=[Depends(get_current_student_user)],
     responses={404: {"description": "Not found"}},
 )
 
@@ -33,7 +33,7 @@ class TestWeightIn(BaseModel):
 @router.post("/attempt")
 async def test_attempt(
     payload: TestAttemptIn,
-    current_user: DBUser = Depends(get_current_active_user),
+    current_user: DBUser = Depends(get_current_student_user),
     db: Session = Depends(get_db)
 ):
     stat = db.query(WordTestStat).filter_by(
@@ -66,7 +66,7 @@ async def test_attempt(
 @router.post("/complete")
 async def test_complete(
     payload: TestCompleteIn,
-    current_user: DBUser = Depends(get_current_active_user),
+    current_user: DBUser = Depends(get_current_student_user),
     db: Session = Depends(get_db)
 ):
     stat = db.query(WordTestStat).filter_by(
@@ -94,7 +94,7 @@ async def test_complete(
 @router.post("/weight")
 async def test_weight(
     payload: TestWeightIn,
-    current_user: DBUser = Depends(get_current_active_user),
+    current_user: DBUser = Depends(get_current_student_user),
     db: Session = Depends(get_db)
 ):
     if payload.direction not in {"up", "down"}:

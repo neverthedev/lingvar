@@ -19,8 +19,8 @@ export default function LoginPage() {
     setError('')
 
     try {
-      await login(data.username, data.password)
-      router.push('/')
+      const user = await login(data.username, data.password)
+      router.replace(user.is_superuser ? '/admin' : '/')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {

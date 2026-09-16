@@ -5,7 +5,7 @@ from datetime import timedelta
 
 from services.database import get_db
 from models.user import User as DBUser
-from services.auth import authenticate_user, create_access_token, get_current_active_user, get_password_hash, ACCESS_TOKEN_EXPIRE_MINUTES
+from services.auth import authenticate_user, create_access_token, get_current_active_user, get_current_student_user, get_password_hash, ACCESS_TOKEN_EXPIRE_MINUTES
 from models.user import UserCreate, UserResponse
 from models.token import Token
 
@@ -32,7 +32,9 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
     db_user = DBUser(
         username=user.username,
         email=user.email,
-        hashed_password=hashed_password
+        hashed_password=hashed_password,
+        is_active=True,
+        is_superuser=False,
     )
     db.add(db_user)
     db.commit()
@@ -65,7 +67,7 @@ async def read_users_me(current_user: DBUser = Depends(get_current_active_user))
 async def get_users(
     skip: int = 0,
     limit: int = 100,
-    current_user: DBUser = Depends(get_current_active_user),
+    current_user: DBUser = Depends(get_current_student_user),
     db: Session = Depends(get_db)
 ):
     users = db.query(DBUser).offset(skip).limit(limit).all()

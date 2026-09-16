@@ -29,3 +29,13 @@ services:
       postgres-test:
         condition: service_healthy
     command: sh -c "pip install --no-cache-dir -r requirements-test.txt && python -m pytest -q -p no:cacheprovider tests"
+
+  browser-tests:
+    build:
+      context: .
+      dockerfile: tests/browser/Dockerfile
+    environment:
+      TEST_DATABASE_URL: postgresql://lingvar_test_user:lingvar_test_password@postgres-test:5432/lingvar_test
+    depends_on:
+      postgres-test:
+        condition: service_healthy

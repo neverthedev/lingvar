@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from services.auth import get_current_active_user
+from services.auth import get_current_student_user
 from services.database import get_db
 from models.user import User as DBUser
 from models.vocabulary import Pronoun
@@ -9,13 +9,13 @@ from models.vocabulary import Pronoun
 router = APIRouter(
     prefix="/api/pronouns",
     tags=["pronouns"],
-    dependencies=[Depends(get_current_active_user)],
+    dependencies=[Depends(get_current_student_user)],
     responses={404: {"description": "Not found"}},
 )
 
 @router.get("/")
 async def get_pronouns(
-    current_user: DBUser = Depends(get_current_active_user),
+    current_user: DBUser = Depends(get_current_student_user),
     db: Session = Depends(get_db)
 ):
     """Get Polish pronouns from database"""

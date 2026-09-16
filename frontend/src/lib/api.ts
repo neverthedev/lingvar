@@ -15,6 +15,7 @@ export const API_ENDPOINTS = {
   pronouns: `${API_BASE_URL}/api/pronouns/`,
   verbs: `${API_BASE_URL}/api/verbs/`,
   exercises: `${API_BASE_URL}/api/exercises/`,
+  adminExercises: `${API_BASE_URL}/admin/exercises`,
   testsAttempt: `${API_BASE_URL}/api/tests/attempt`,
   testsComplete: `${API_BASE_URL}/api/tests/complete`,
   testsWeight: `${API_BASE_URL}/api/tests/weight`
@@ -44,6 +45,11 @@ export interface Token {
 export interface LoginCredentials {
   username: string
   password: string
+}
+
+export interface ExerciseMetadata {
+  id: string
+  title: string
 }
 
 // Authentication utilities
@@ -196,6 +202,23 @@ export class ApiService {
       }
       const errorData = await response.json()
       throw new Error(errorData.detail || 'Failed to fetch users')
+    }
+
+    return response.json()
+  }
+
+  static async getAdminExercises(): Promise<ExerciseMetadata[]> {
+    const response = await fetch(API_ENDPOINTS.adminExercises, {
+      method: 'GET',
+      headers: AuthService.getAuthHeaders()
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null)
+      const detail = errorData && typeof errorData === 'object' && 'detail' in errorData
+        ? errorData.detail
+        : null
+      throw new Error(typeof detail === 'string' ? detail : 'Failed to fetch exercises')
     }
 
     return response.json()
