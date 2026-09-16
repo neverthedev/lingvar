@@ -4,7 +4,7 @@ import os
 
 from services.database import get_db, test_connection
 from models.user import User as DBUser
-from services.auth import get_current_active_user
+from services.auth import get_current_student_user
 
 router = APIRouter(
     prefix="/api",
@@ -25,7 +25,7 @@ async def health_check():
 
 @router.get("/db-test")
 async def test_database_connection(
-    current_user: DBUser = Depends(get_current_active_user),
+    current_user: DBUser = Depends(get_current_student_user),
     db: Session = Depends(get_db)
 ):
     """Database connection test endpoint"""

@@ -2,14 +2,15 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import { UserResponse, AuthService, ApiService } from '@/lib/api'
+import { RoleRouteGuard } from '@/components/RoleRouteGuard'
 
 interface AuthContextType {
   user: UserResponse | null
   isLoading: boolean
   isAuthenticated: boolean
-  login: (username: string, password: string) => Promise<void>
+  login: (username: string, password: string) => Promise<UserResponse>
   logout: () => void
-  refreshUser: () => Promise<void>
+  refreshUser: () => Promise<UserResponse | null>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -32,7 +33,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (username: string, password: string) => {
     const tokenData = await ApiService.login({ username, password })
     AuthService.setTokens(tokenData.access_token, tokenData.token_type)
-    await refreshUser()
+    const userData = await refreshUser()
+    if (!userData) {
+      throw new Error('Unable to restore the signed-in user.')
+    }
+    return userData
   }
 
   const logout = () => {
@@ -45,10 +50,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(true)
       const userData = await ApiService.getCurrentUser()
       setUser(userData)
+      return userData
     } catch (error) {
       console.error('Failed to fetch user data:', error)
       AuthService.clearTokens()
       setUser(null)
+      return null
     } finally {
       setIsLoading(false)
     }
@@ -65,7 +72,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         refreshUser
       }}
     >
-      {children}
+      <RoleRouteGuard
+        user={user}
+        isAuthenticated={isAuthenticated}
+        isLoading={isLoading}
+      >
+        {children}
+      </RoleRouteGuard>
     </AuthContext.Provider>
   )
 }

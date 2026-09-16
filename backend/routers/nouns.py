@@ -5,18 +5,18 @@ from sqlalchemy import func
 from services.database import get_db
 from models.vocabulary import Noun
 from models.user import User as DBUser
-from services.auth import get_current_active_user
+from services.auth import get_current_student_user
 
 router = APIRouter(
     prefix="/api/nouns",
     tags=["nouns"],
-    dependencies=[Depends(get_current_active_user)],
+    dependencies=[Depends(get_current_student_user)],
     responses={404: {"description": "Not found"}},
 )
 
 @router.get("/single")
 async def get_nouns_single(
-    current_user: DBUser = Depends(get_current_active_user),
+    current_user: DBUser = Depends(get_current_student_user),
     db: Session = Depends(get_db)
 ):
     """Get 20 random nouns with their single cases (flat JSON)"""
@@ -37,7 +37,7 @@ async def get_nouns_single(
 
 @router.get("/plural")
 async def get_nouns_plural(
-    current_user: DBUser = Depends(get_current_active_user),
+    current_user: DBUser = Depends(get_current_student_user),
     db: Session = Depends(get_db)
 ):
     """Get 20 random nouns with their plural cases (stub implementation)"""

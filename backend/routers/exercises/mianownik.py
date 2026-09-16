@@ -6,12 +6,12 @@ from typing import List, Dict, Union
 from services.database import get_db
 from models.vocabulary import Noun
 from models.user import User as DBUser
-from services.auth import get_current_active_user
+from services.auth import get_current_student_user
 
 router = APIRouter(
     prefix="/mianownik",
     tags=["exercises-mianownik"],
-    dependencies=[Depends(get_current_active_user)],
+    dependencies=[Depends(get_current_student_user)],
     responses={404: {"description": "Not found"}},
 )
 
@@ -21,7 +21,7 @@ router = APIRouter(
 # https://wordwall.net/resource/97784670/polish/mianownik-liczby-mnogiej-niem%C4%99skoosobowe-formy
 @router.get("/mnoga", response_model=List[Dict[str, Union[str, int]]])
 async def get_mianownik_mnoga_exercise(
-    current_user: DBUser = Depends(get_current_active_user),
+    current_user: DBUser = Depends(get_current_student_user),
     db: Session = Depends(get_db)
 ):
     """

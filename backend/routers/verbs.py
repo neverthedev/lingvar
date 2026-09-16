@@ -5,18 +5,18 @@ from sqlalchemy import func, case, Float, cast, text
 from services.database import get_db
 from models.vocabulary import Verb, WordTestStat
 from models.user import User as DBUser
-from services.auth import get_current_active_user
+from services.auth import get_current_student_user
 
 router = APIRouter(
     prefix="/api/verbs",
     tags=["verbs"],
-    dependencies=[Depends(get_current_active_user)],
+    dependencies=[Depends(get_current_student_user)],
     responses={404: {"description": "Not found"}},
 )
 
 @router.get("/")
 async def get_verbs(
-    current_user: DBUser = Depends(get_current_active_user),
+    current_user: DBUser = Depends(get_current_student_user),
     db: Session = Depends(get_db)
 ):
     """Get 20 random Polish verbs with their conjugations"""
