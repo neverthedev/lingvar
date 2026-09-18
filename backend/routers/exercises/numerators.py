@@ -1,12 +1,11 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 from typing import List, Dict, Union
 
 from services.database import get_db
-from models.vocabulary import Numerator
 from models.user import User as DBUser
 from services.auth import get_current_student_user
+from services.exercises import load_numerators_translation_to_word
 
 router = APIRouter(
     prefix="/numerators",
@@ -21,19 +20,9 @@ async def get_numerators_exercise(
     current_user: DBUser = Depends(get_current_student_user),
     db: Session = Depends(get_db)
 ):
-    """
-    Get 20 random numerators with their Polish word and Russian translation for exercise.
-    Returns random numerators from the database for translation practice.
-    """
-    # Get 20 random numerators from the database
-    numerators = db.query(Numerator).order_by(func.random()).limit(20).all()
-
-    exercise_items = []
-    for numerator in numerators:
-        exercise_items.append({
-            "id": str(numerator.id),
-            "word": numerator.word,
-            "description": numerator.translation
-        })
-
-    return exercise_items
+    content = load_numerators_translation_to_word(
+        db,
+        {"sample_size": 20, "max_attempts": 3, "reveal_after_exhaustion": True},
+        current_user.id,
+    )
+    return [{"id": str(item["id"]), "word": item["answer"], "description": item["prompt"]} for item in content.get("items", [])]

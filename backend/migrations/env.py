@@ -30,6 +30,7 @@ from services.base import Base
 from services import migrations
 import models.user  # Registers SQLAlchemy metadata for autogenerate.
 import models.vocabulary  # Registers SQLAlchemy metadata for autogenerate.
+import models.exercise  # Registers SQLAlchemy metadata for autogenerate.
 
 
 config = context.config

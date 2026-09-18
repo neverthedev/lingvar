@@ -1,59 +1,15 @@
 """HTTP integration workflows against the isolated PostgreSQL test database."""
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
-from pathlib import Path
-
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from helpers import authorization_header, create_admin, upgrade_schema
 
-BACKEND_DIRECTORY = Path(__file__).resolve().parents[1]
-
-
-def _upgrade_schema(database_url: str) -> None:
-    environment = os.environ.copy()
-    environment["DATABASE_URL"] = database_url
-    result = subprocess.run(
-        [sys.executable, "-m", "migrate", "upgrade"],
-        cwd=BACKEND_DIRECTORY,
-        env=environment,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-
-
-def _create_admin(database_url: str, username: str, email: str, password: str) -> subprocess.CompletedProcess[str]:
-    environment = os.environ.copy()
-    environment["DATABASE_URL"] = database_url
-    return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "create_admin",
-            "--username",
-            username,
-            "--email",
-            email,
-            "--password-stdin",
-        ],
-        cwd=BACKEND_DIRECTORY,
-        env=environment,
-        input=f"{password}\n",
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-
-def _authorization_header(client: TestClient, username: str, password: str) -> dict[str, str]:
-    token = client.post("/users/token", data={"username": username, "password": password})
-    assert token.status_code == 200, token.text
-    return {"Authorization": f"Bearer {token.json()['access_token']}"}
+# Compatibility names keep the pre-existing scenarios compact.
+_upgrade_schema = upgrade_schema
+_create_admin = create_admin
+_authorization_header = authorization_header
 
 
 LEARNING_GET_ENDPOINTS = (
@@ -252,7 +208,10 @@ def test_administrator_is_limited_to_exercise_metadata_and_student_learning_flow
         admin_catalog = client.get("/admin/exercises", headers=admin_headers)
         assert admin_catalog.status_code == 200, admin_catalog.text
         assert admin_catalog.json()
-        assert all(set(item) == {"id", "title"} for item in admin_catalog.json())
+        assert all(
+            set(item) == {"id", "slug", "title", "type_code", "schema_version", "status", "display_order"}
+            for item in admin_catalog.json()
+        )
 
         for endpoint in LEARNING_GET_ENDPOINTS:
             no_token = client.get(endpoint)
@@ -313,7 +272,7 @@ def test_administrator_is_limited_to_exercise_metadata_and_student_learning_flow
 
 
 def test_administrator_catalog_returns_an_explicit_empty_list_for_an_empty_catalog(
-    test_engine, test_database_url, monkeypatch
+    test_engine, test_database_url
 ):
     """The metadata API exposes an empty catalog as an empty list, without learner data."""
     _upgrade_schema(test_database_url)
@@ -327,10 +286,10 @@ def test_administrator_catalog_returns_an_explicit_empty_list_for_an_empty_catal
     assert "traceback" not in created.stderr.lower()
     assert "bcrypt" not in created.stderr.lower()
 
-    from main import app
-    from routers.admin import main as admin_router
+    with test_engine.begin() as connection:
+        connection.execute(text("DELETE FROM exercises"))
 
-    monkeypatch.setattr(admin_router, "EXERCISE_CATALOG", ())
+    from main import app
     with TestClient(app) as client:
         headers = _authorization_header(client, "empty-catalog-admin-qa", "safe-admin-password-8")
         catalog = client.get("/admin/exercises", headers=headers)
