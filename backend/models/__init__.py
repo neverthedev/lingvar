@@ -1,9 +1,10 @@
 from .user import User, UserBase, UserCreate, UserResponse, UserUpdate
 from .token import Token, TokenData, UserLogin
 from .vocabulary import Noun, Pronoun, Verb, WordTestStat
+from .exercise import Exercise, ExerciseSession
 
 __all__ = [
     "User", "UserBase", "UserCreate", "UserResponse", "UserUpdate",
     "Token", "TokenData", "UserLogin",
-    "Noun", "Pronoun", "Verb", "WordTestStat"
+    "Noun", "Pronoun", "Verb", "WordTestStat", "Exercise", "ExerciseSession"
 ]

@@ -4,21 +4,12 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useRouter } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import { PageLayout, ExerciseGrid, Typography, LoadingSpinner } from '@/components'
-import { AuthService, API_ENDPOINTS } from '@/lib/api'
-
-interface Exercise {
-  id: string
-  title: string
-  description: string
-  api: string
-  difficulty: 'Beginner' | 'Intermediate' | 'Advanced'
-  duration: string
-}
+import { ApiService, ExerciseCatalogItem } from '@/lib/api'
 
 export default function ExercisesPage() {
   const { isAuthenticated, isLoading } = useAuth()
   const router = useRouter()
-  const [exercises, setExercises] = useState<Exercise[]>([])
+  const [exercises, setExercises] = useState<ExerciseCatalogItem[]>([])
   const [exercisesLoading, setExercisesLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -32,22 +23,7 @@ export default function ExercisesPage() {
     try {
       setExercisesLoading(true)
 
-      const response = await fetch(API_ENDPOINTS.exercises, {
-        method: 'GET',
-        headers: AuthService.getAuthHeaders()
-      })
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          // Token expired or invalid, redirect to login
-          AuthService.clearTokens()
-          router.push('/login')
-          return
-        }
-        throw new Error('Failed to fetch exercises')
-      }
-      const data = await response.json()
-      setExercises(data)
+      setExercises(await ApiService.getExercises())
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {
@@ -106,7 +82,7 @@ export default function ExercisesPage() {
         </div>
 
         {exercises.length > 0 ? (
-          <ExerciseGrid exercises={exercises} className="max-w-4xl mx-auto" />
+          <ExerciseGrid exercises={exercises.map(exercise => ({ id: exercise.slug, title: exercise.title, description: exercise.description, difficulty: `${exercise.difficulty[0].toUpperCase()}${exercise.difficulty.slice(1)}` as 'Beginner' | 'Intermediate' | 'Advanced', duration: exercise.estimated_duration_minutes ? `${exercise.estimated_duration_minutes} min` : undefined }))} className="max-w-4xl mx-auto" />
         ) : (
           <div className="text-center">
             <Typography variant="h3" className="mb-4">

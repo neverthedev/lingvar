@@ -15,7 +15,9 @@ export const API_ENDPOINTS = {
   pronouns: `${API_BASE_URL}/api/pronouns/`,
   verbs: `${API_BASE_URL}/api/verbs/`,
   exercises: `${API_BASE_URL}/api/exercises/`,
+  exerciseSessions: `${API_BASE_URL}/api/exercise-sessions`,
   adminExercises: `${API_BASE_URL}/admin/exercises`,
+  adminExerciseTypes: `${API_BASE_URL}/admin/exercise-types`,
   adminRules: `${API_BASE_URL}/admin/rules`,
   testsAttempt: `${API_BASE_URL}/api/tests/attempt`,
   testsComplete: `${API_BASE_URL}/api/tests/complete`,
@@ -48,10 +50,25 @@ export interface LoginCredentials {
   password: string
 }
 
-export interface ExerciseMetadata {
-  id: string
-  title: string
-}
+export type ExerciseTypeCode = 'form_table' | 'single_input' | 'self_check' | 'fill_blanks'
+export interface ExerciseCatalogItem { slug: string; title: string; description: string; difficulty: 'beginner' | 'intermediate' | 'advanced'; estimated_duration_minutes: number | null; type_code: ExerciseTypeCode }
+export interface ExerciseMetadata { id: number; slug: string; title: string; type_code: ExerciseTypeCode; schema_version: number; status: 'draft' | 'published'; display_order: number }
+export interface ExerciseType { code: ExerciseTypeCode; label: string; schema_version: number }
+export interface ExerciseRecord extends ExerciseMetadata { description: string; instruction: string; difficulty: 'beginner' | 'intermediate' | 'advanced'; estimated_duration_minutes: number | null; definition: ExerciseDefinition }
+export type ColumnDefinition = { key: string; label: string }
+export type FormTableDefinition = { source_code: string; columns: ColumnDefinition[]; sample_size: number | null; max_attempts: 3 }
+export type SingleInputDefinition = { source_code: string; sample_size: number | null; max_attempts: 3; reveal_after_exhaustion: true }
+export type SelfCheckDefinition = { source_code: string; sample_size: number | null }
+export type FillBlankPartDefinition = { kind: 'blank'; id: string; hint: string | null; accepted_answers: string[] }
+export type FillTextPartDefinition = { kind: 'text'; text: string }
+export type FillBlanksDefinition = { items: Array<{ id: string; parts: Array<FillBlankPartDefinition | FillTextPartDefinition> }> }
+export type ExerciseDefinition = FormTableDefinition | SingleInputDefinition | SelfCheckDefinition | FillBlanksDefinition
+export type ExerciseContent = { slug: string; title: string; description: string; instruction: string; difficulty: string; estimated_duration_minutes: number | null; schema_version: 1 } & (
+  { type_code: 'form_table'; content: { columns: ColumnDefinition[]; max_attempts: 3; statistics_word_type: string; rows: Array<{id:number; prompt:string; answers:Record<string,string>; weight?:number}> } } |
+  { type_code: 'single_input'; content: { max_attempts: 3; reveal_after_exhaustion: true; items: Array<{id:number;prompt:string;answer:string}> } } |
+  { type_code: 'self_check'; content: { items: Array<{id:number;prompt:string;answer:string}> } } |
+  { type_code: 'fill_blanks'; content: { items: Array<{id:string;parts:Array<{kind:'text';text:string}|{kind:'blank';id:string;hint:string|null}>}> } }
+)
 
 export interface RuleNode {
   id: number
@@ -66,6 +83,19 @@ export interface RulePayload {
   title: string
   description: string
   parent_rule_id: number | null
+}
+
+export interface ApiValidationIssue {
+  loc?: Array<string | number>
+  msg: string
+  type?: string
+}
+
+export class ApiRequestError extends Error {
+  constructor(message: string, public readonly issues: ApiValidationIssue[] = []) {
+    super(message)
+    this.name = 'ApiRequestError'
+  }
 }
 
 // Authentication utilities
@@ -137,7 +167,12 @@ export class ApiService {
       const detail = errorData && typeof errorData === 'object' && 'detail' in errorData
         ? errorData.detail
         : null
-      throw new Error(typeof detail === 'string' && detail.trim() ? detail : fallback)
+      if (Array.isArray(detail)) {
+        const issues = detail.filter((item): item is ApiValidationIssue => typeof item === 'object' && item !== null && 'msg' in item && typeof item.msg === 'string')
+        const message = issues.map(item => `${item.loc?.join('.') || 'definition'}: ${item.msg}`).join('\n') || fallback
+        throw new ApiRequestError(message, issues)
+      }
+      throw new ApiRequestError(typeof detail === 'string' && detail.trim() ? detail : fallback)
     }
 
     if (response.status === 204) {
@@ -293,4 +328,11 @@ export class ApiService {
       method: 'DELETE',
     }, 'Unable to delete rule. Changes were not saved.')
   }
+
+  static getAdminExerciseTypes(): Promise<ExerciseType[]> { return this.adminRequest<ExerciseType[]>(API_ENDPOINTS.adminExerciseTypes, { method: 'GET' }, 'Не удалось загрузить типы упражнений') }
+  static getAdminExercise(id: number): Promise<ExerciseRecord> { return this.adminRequest<ExerciseRecord>(`${API_ENDPOINTS.adminExercises}/${id}`, { method: 'GET' }, 'Не удалось загрузить упражнение') }
+  static createAdminExercise(payload: Omit<ExerciseRecord, 'id'>): Promise<ExerciseRecord> { return this.adminRequest<ExerciseRecord>(API_ENDPOINTS.adminExercises, { method: 'POST', body: JSON.stringify(payload) }, 'Не удалось создать упражнение') }
+  static updateAdminExercise(id: number, payload: Omit<ExerciseRecord, 'id' | 'slug' | 'type_code' | 'schema_version'>): Promise<ExerciseRecord> { return this.adminRequest<ExerciseRecord>(`${API_ENDPOINTS.adminExercises}/${id}`, { method: 'PUT', body: JSON.stringify(payload) }, 'Не удалось сохранить упражнение') }
+  static async getExercises(): Promise<ExerciseCatalogItem[]> { return this.adminRequest<ExerciseCatalogItem[]>(API_ENDPOINTS.exercises, { method: 'GET' }, 'Не удалось загрузить каталог') }
+  static async getExerciseContent(slug: string): Promise<ExerciseContent> { return this.adminRequest<ExerciseContent>(`${API_ENDPOINTS.exercises}${slug}/content`, { method: 'GET' }, 'Не удалось загрузить упражнение') }
 }

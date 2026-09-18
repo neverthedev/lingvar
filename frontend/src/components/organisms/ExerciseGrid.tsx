@@ -6,7 +6,6 @@ export interface ExerciseGridProps {
     id: string
     title: string
     description: string
-    api: string
     difficulty?: 'Beginner' | 'Intermediate' | 'Advanced'
     duration?: string
   }>
@@ -25,7 +24,6 @@ export const ExerciseGrid: React.FC<ExerciseGridProps> = ({
           title={exercise.title}
           description={exercise.description}
           href={`/exercises/${exercise.id}`}
-          api={exercise.api}
           difficulty={exercise.difficulty}
           duration={exercise.duration}
         />

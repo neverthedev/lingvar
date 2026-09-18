@@ -1,11 +1,18 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 from services.database import get_db
-from models.vocabulary import Noun
 from models.user import User as DBUser
 from services.auth import get_current_student_user
+from services.exercises import load_nouns_singular_cases
+
+
+ALL_CASE_COLUMNS = [
+    {"key": "mianownik", "label": "Mianownik"}, {"key": "dopełniacz", "label": "Dopełniacz"},
+    {"key": "celownik", "label": "Celownik"}, {"key": "biernik", "label": "Biernik"},
+    {"key": "narzędnik", "label": "Narzędnik"}, {"key": "miejscownik", "label": "Miejscownik"},
+    {"key": "wołacz", "label": "Wołacz"},
+]
 
 router = APIRouter(
     prefix="/api/nouns",
@@ -20,20 +27,12 @@ async def get_nouns_single(
     db: Session = Depends(get_db)
 ):
     """Get 20 random nouns with their single cases (flat JSON)"""
-    nouns = db.query(Noun).order_by(func.random()).limit(20).all()
-    # Define all possible cases (adjust as needed for your language)
-    all_cases = ["mianownik", "dopełniacz", "celownik", "biernik", "narzędnik", "miejscownik", "wołacz"]
-    result = []
-    for noun in nouns:
-        # Start with all cases as empty string
-        flat = {"id": noun.id, "word": noun.word}
-        for case in all_cases:
-            flat[case] = ""
-        # Merge actual cases_pojed values if present
-        if isinstance(noun.cases_pojed, dict):
-            flat.update(noun.cases_pojed)
-        result.append(flat)
-    return result
+    content = load_nouns_singular_cases(
+        db,
+        {"columns": ALL_CASE_COLUMNS, "sample_size": 20, "max_attempts": 3},
+        current_user.id,
+    )
+    return [{"id": row["id"], "word": row["prompt"], **row["answers"]} for row in content["rows"]]
 
 @router.get("/plural")
 async def get_nouns_plural(

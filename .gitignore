@@ -34,3 +34,5 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 docs/lessons/**
+reword_pl.backup
+frontend/tsconfig.tsbuildinfo

@@ -49,6 +49,7 @@ app.include_router(verbs.router)
 app.include_router(tests.router)
 app.include_router(misc.router)
 app.include_router(exercises.router)
+app.include_router(exercises.session_router)
 app.include_router(admin.router)
 
 if __name__ == "__main__":

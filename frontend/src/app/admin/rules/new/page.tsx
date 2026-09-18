@@ -38,9 +38,14 @@ export default function NewAdminRulePage() {
     setSaveError(null)
     try {
       const created = await ApiService.createAdminRule({ ...draft, title: draft.title.trim(), description: draft.description.trim() })
+      if (created.parent_rule_id === null) {
+        router.replace(`/admin/rules/${created.id}`)
+        return
+      }
+
       const refreshed = await ApiService.getAdminRules()
-      const parent = created.parent_rule_id === null ? null : findRule(refreshed, created.parent_rule_id)
-      const root = parent ? refreshed.find((node) => findRule([node], parent.id)) : refreshed.find((node) => node.id === created.id)
+      const parent = findRule(refreshed, created.parent_rule_id)
+      const root = parent ? refreshed.find((node) => findRule([node], parent.id)) : null
       router.replace(`/admin/rules/${root?.id ?? created.id}`)
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : 'Не удалось сохранить правило.')

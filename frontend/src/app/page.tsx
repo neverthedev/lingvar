@@ -1,11 +1,34 @@
 'use client'
 
 import { useAuth } from '@/contexts/AuthContext'
-import { PageLayout, Typography, Button, LoadingSpinner, Icon } from '@/components'
+import { PageLayout, Typography, Button, LoadingSpinner, ExerciseGrid } from '@/components'
+import { ApiService, ExerciseCatalogItem } from '@/lib/api'
 import Link from 'next/link'
+import { useEffect, useState } from 'react'
 
 export default function Home() {
   const { user, isAuthenticated, isLoading } = useAuth()
+  const [exercises, setExercises] = useState<ExerciseCatalogItem[]>([])
+  const [exercisesLoading, setExercisesLoading] = useState(false)
+  const [exercisesError, setExercisesError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!isAuthenticated) return
+
+    const loadExercises = async () => {
+      try {
+        setExercisesLoading(true)
+        setExercisesError(null)
+        setExercises(await ApiService.getExercises())
+      } catch (err) {
+        setExercisesError(err instanceof Error ? err.message : 'Unable to load exercises')
+      } finally {
+        setExercisesLoading(false)
+      }
+    }
+
+    loadExercises()
+  }, [isAuthenticated])
 
   return (
     <PageLayout>
@@ -61,7 +84,7 @@ export default function Home() {
                   </Typography>
                 </div>
                 <div className="mt-4">
-                  <Link href="/lessons">
+                  <Link href="/exercises">
                     <Button variant="primary" className="w-full">
                       Continue Learning
                     </Button>
@@ -72,57 +95,40 @@ export default function Home() {
           )}
         </div>
 
-        <div className="mt-16">
-          <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
-            <Link href="/lessons" className="block">
-              <div className="bg-white rounded-lg shadow-lg p-6 hover:shadow-xl transition-shadow cursor-pointer">
-                <div className="text-center">
-                  <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center mx-auto mb-4">
-                    <Icon name="book" size="lg" className="text-indigo-600" />
-                  </div>
-                  <Typography variant="h5" weight="semibold" className="mb-2">
-                    Inclication Trainings
-                  </Typography>
-                  <Typography variant="body" color="secondary">
-                    Dive into our interactive declension exercises to master noun and pronoun forms in various contexts.
-                  </Typography>
-                </div>
-              </div>
-            </Link>
-
-            <Link href="/exercises" className="block">
-              <div className="bg-white rounded-lg shadow-lg p-6 hover:shadow-xl transition-shadow cursor-pointer">
-                <div className="text-center">
-                  <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                  </div>
-                  <Typography variant="h5" weight="semibold" className="mb-2">
-                    Exercises & Quizzes
-                  </Typography>
-                  <Typography variant="body" color="secondary">
-                    Test your knowledge with a variety of exercises and quizzes designed to reinforce your learning.
-                  </Typography>
-                </div>
-              </div>
-            </Link>
-
-            <div className="bg-white rounded-lg shadow-lg p-6">
-              <div className="text-center">
-                <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center mx-auto mb-4">
-                  <Icon name="user" size="lg" className="text-indigo-600" />
-                </div>
-                <Typography variant="h5" weight="semibold" className="mb-2">
-                  Community Learning
-                </Typography>
-                <Typography variant="body" color="secondary">
-                  Connect with other learners, practice together, and share your learning journey.
-                </Typography>
-              </div>
+        {isAuthenticated && (
+          <section className="mt-16" aria-labelledby="exercises-heading">
+            <div id="exercises-heading">
+              <Typography variant="h2" weight="bold" align="center" className="mb-8">
+                Exercises
+              </Typography>
             </div>
-          </div>
-        </div>
+
+            {exercisesLoading ? (
+              <div className="flex justify-center py-12">
+                <LoadingSpinner size="lg" />
+              </div>
+            ) : exercisesError ? (
+              <Typography variant="body" color="danger" align="center">
+                {exercisesError}
+              </Typography>
+            ) : exercises.length > 0 ? (
+              <ExerciseGrid
+                exercises={exercises.map((exercise) => ({
+                  id: exercise.slug,
+                  title: exercise.title,
+                  description: exercise.description,
+                  difficulty: `${exercise.difficulty[0].toUpperCase()}${exercise.difficulty.slice(1)}` as 'Beginner' | 'Intermediate' | 'Advanced',
+                  duration: exercise.estimated_duration_minutes ? `${exercise.estimated_duration_minutes} min` : undefined,
+                }))}
+                className="max-w-4xl mx-auto"
+              />
+            ) : (
+              <Typography variant="body" color="secondary" align="center">
+                Exercises are being prepared. Please check back later.
+              </Typography>
+            )}
+          </section>
+        )}
       </div>
     </PageLayout>
   )
