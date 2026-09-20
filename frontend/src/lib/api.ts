@@ -70,6 +70,49 @@ export type ExerciseContent = { slug: string; title: string; description: string
   { type_code: 'fill_blanks'; content: { items: Array<{id:string;parts:Array<{kind:'text';text:string}|{kind:'blank';id:string;hint:string|null}>}> } }
 )
 
+export type AnswerState = { value: string | null; attempts_used: number; status: 'open' | 'correct' | 'exhausted'; last_check: 'correct' | 'incorrect' | null; revealed_answer?: string; revealed_answers?: string[] }
+type ExerciseSessionBase = {
+  session_id: string
+  expires_at: string
+  revision: number
+  slug: string
+  title: string
+  description: string
+  instruction: string
+  difficulty: string
+  estimated_duration_minutes: number | null
+  schema_version: 1
+}
+export type ExerciseSessionSnapshot = ExerciseSessionBase & (
+  | {
+    type_code: 'form_table'
+    content: { columns: ColumnDefinition[]; max_attempts: 3; statistics_word_type: string; rows: Array<{ id: number; prompt: string; weight?: number }> }
+    progress: { cells: Record<string, AnswerState>; rows: Record<string, { completed: boolean; all_correct: boolean | null; weight: number }> }
+  }
+  | {
+    type_code: 'single_input'
+    content: { max_attempts: 3; reveal_after_exhaustion: true; items: Array<{ id: number; prompt: string }> }
+    progress: { items: Record<string, AnswerState> }
+  }
+  | {
+    type_code: 'self_check'
+    content: { items: Array<{ id: number; prompt: string }> }
+    progress: { items: Record<string, { revealed: boolean; result: 'correct' | 'incorrect' | null; answer?: string }> }
+  }
+  | {
+    type_code: 'fill_blanks'
+    content: { items: Array<{ id: string; parts: Array<{ kind: 'text'; text: string } | { kind: 'blank'; id: string; hint: string | null }> }> }
+    progress: { blanks: Record<string, AnswerState> }
+  }
+)
+export type ExerciseSessionAction =
+  | { action: 'form_table_check'; row_id: number; column_key: string; answer: string; expected_attempts_used: number }
+  | { action: 'form_table_weight'; row_id: number; direction: 'up' | 'down' }
+  | { action: 'single_input_check'; item_id: number; answer: string; expected_attempts_used: number }
+  | { action: 'self_check_reveal'; item_id: number }
+  | { action: 'self_check_mark'; item_id: number; result: 'correct' | 'incorrect' }
+  | { action: 'fill_blank_check'; blank_id: string; answer: string; expected_attempts_used: number }
+
 export interface RuleNode {
   id: number
   title: string
@@ -95,6 +138,13 @@ export class ApiRequestError extends Error {
   constructor(message: string, public readonly issues: ApiValidationIssue[] = []) {
     super(message)
     this.name = 'ApiRequestError'
+  }
+}
+
+export class ExerciseSessionRequestError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message)
+    this.name = 'ExerciseSessionRequestError'
   }
 }
 
@@ -151,6 +201,24 @@ export class AuthService {
 
 // API call functions
 export class ApiService {
+  private static async learnerRequest<T>(url: string, options: RequestInit, fallback: string): Promise<T> {
+    let response: Response
+    try {
+      response = await fetch(url, { ...options, headers: AuthService.getAuthHeaders() })
+    } catch {
+      throw new ExerciseSessionRequestError('Не удалось связаться с сервером. Попробуйте ещё раз.', 0)
+    }
+    if (!response.ok) {
+      const body: unknown = await response.json().catch(() => null)
+      const detail = body && typeof body === 'object' && 'detail' in body ? body.detail : null
+      throw new ExerciseSessionRequestError(typeof detail === 'string' && detail.trim() ? detail : fallback, response.status)
+    }
+    try {
+      return await response.json() as T
+    } catch {
+      throw new ExerciseSessionRequestError('Сервер вернул некорректный ответ.', response.status)
+    }
+  }
   private static async adminRequest<T>(url: string, options: RequestInit, fallback: string): Promise<T> {
     let response: Response
     try {
@@ -335,4 +403,8 @@ export class ApiService {
   static updateAdminExercise(id: number, payload: Omit<ExerciseRecord, 'id' | 'slug' | 'type_code' | 'schema_version'>): Promise<ExerciseRecord> { return this.adminRequest<ExerciseRecord>(`${API_ENDPOINTS.adminExercises}/${id}`, { method: 'PUT', body: JSON.stringify(payload) }, 'Не удалось сохранить упражнение') }
   static async getExercises(): Promise<ExerciseCatalogItem[]> { return this.adminRequest<ExerciseCatalogItem[]>(API_ENDPOINTS.exercises, { method: 'GET' }, 'Не удалось загрузить каталог') }
   static async getExerciseContent(slug: string): Promise<ExerciseContent> { return this.adminRequest<ExerciseContent>(`${API_ENDPOINTS.exercises}${slug}/content`, { method: 'GET' }, 'Не удалось загрузить упражнение') }
+  static createExerciseSession(slug: string): Promise<ExerciseSessionSnapshot> { return this.learnerRequest(`${API_ENDPOINTS.exercises}${slug}/sessions`, { method: 'POST' }, 'Не удалось начать упражнение') }
+  static getExerciseSession(slug: string, sessionId: string): Promise<ExerciseSessionSnapshot> { return this.learnerRequest(`${API_ENDPOINTS.exercises}${slug}/sessions/${encodeURIComponent(sessionId)}`, { method: 'GET' }, 'Не удалось восстановить упражнение') }
+  static applyExerciseSessionAction(slug: string, sessionId: string, action: ExerciseSessionAction): Promise<ExerciseSessionSnapshot> { return this.learnerRequest(`${API_ENDPOINTS.exercises}${slug}/sessions/${encodeURIComponent(sessionId)}/actions`, { method: 'POST', body: JSON.stringify(action) }, 'Не удалось сохранить результат') }
+  static restartExerciseSession(slug: string, sessionId: string): Promise<ExerciseSessionSnapshot> { return this.learnerRequest(`${API_ENDPOINTS.exercises}${slug}/sessions/${encodeURIComponent(sessionId)}/restart`, { method: 'POST' }, 'Не удалось начать заново') }
 }

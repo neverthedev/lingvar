@@ -41,13 +41,20 @@ class ExerciseSession(Base):
     __tablename__ = "exercise_sessions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    public_id = Column(String(22), nullable=False, unique=True)
     exercise_id = Column(Integer, ForeignKey("exercises.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     state = Column(JSONB, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
+    revision = Column(Integer, nullable=False, default=1)
 
     __table_args__ = (
+        CheckConstraint("char_length(public_id) = 22", name="ck_exercise_sessions_public_id_length"),
+        CheckConstraint(
+            "expires_at = created_at + INTERVAL '24 hours'",
+            name="ck_exercise_sessions_fixed_ttl",
+        ),
         Index("ix_exercise_sessions_expires_at", "expires_at"),
         Index("ix_exercise_sessions_user_exercise", "user_id", "exercise_id"),
     )

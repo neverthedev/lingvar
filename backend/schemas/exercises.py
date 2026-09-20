@@ -193,6 +193,58 @@ class BlankCheckRequest(StrictModel):
     answer: str
 
 
+class FormTableCheckAction(StrictModel):
+    action: Literal["form_table_check"]
+    row_id: int
+    column_key: str
+    answer: str
+    expected_attempts_used: int = Field(ge=0)
+
+
+class FormTableWeightAction(StrictModel):
+    action: Literal["form_table_weight"]
+    row_id: int
+    direction: Literal["up", "down"]
+
+
+class SingleInputCheckAction(StrictModel):
+    action: Literal["single_input_check"]
+    item_id: int
+    answer: str
+    expected_attempts_used: int = Field(ge=0)
+
+
+class SelfCheckRevealAction(StrictModel):
+    action: Literal["self_check_reveal"]
+    item_id: int
+
+
+class SelfCheckMarkAction(StrictModel):
+    action: Literal["self_check_mark"]
+    item_id: int
+    result: Literal["correct", "incorrect"]
+
+
+class FillBlankCheckAction(StrictModel):
+    action: Literal["fill_blank_check"]
+    blank_id: str
+    answer: str
+    expected_attempts_used: int = Field(ge=0)
+
+
+SessionActionRequest = Annotated[
+    Union[
+        FormTableCheckAction,
+        FormTableWeightAction,
+        SingleInputCheckAction,
+        SelfCheckRevealAction,
+        SelfCheckMarkAction,
+        FillBlankCheckAction,
+    ],
+    Field(discriminator="action"),
+]
+
+
 class LearnerCatalogItem(StrictModel):
     slug: str
     title: str

@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,7 +17,7 @@ from sqlalchemy.engine import make_url
 
 BACKEND_DIRECTORY = Path(__file__).resolve().parents[1]
 INITIAL_REVISION = "0001_initial_schema"
-HEAD_REVISION = "0002_exercise_types"
+HEAD_REVISION = "0003_exercise_session_public_id"
 APPLICATION_TABLES = {
     "users",
     "nouns",
@@ -108,7 +111,7 @@ def test_initial_migration_lifecycle(test_engine, test_database_url):
 
     downgrade = _alembic_downgrade(test_database_url)
     assert downgrade.returncode != 0
-    assert "Downgrade of exercise types is forbidden" in (downgrade.stdout + downgrade.stderr)
+    assert "Downgrade of exercise session public identifiers is not supported" in (downgrade.stdout + downgrade.stderr)
     assert _application_tables(test_engine) == APPLICATION_TABLES
     assert _migration_command("check", test_database_url).returncode == 0
 
@@ -143,12 +146,12 @@ def test_direct_stamp_is_forbidden(test_database_url):
     assert "Direct alembic stamp is disabled" in (result.stdout + result.stderr)
 
 
-def test_exercise_migration_upgrades_an_existing_initial_schema(test_engine, test_database_url):
-    """The second revision backfills the published catalog without touching vocabulary."""
+def test_exercise_migration_upgrades_an_existing_exercise_schema(test_engine, test_database_url):
+    """Revision 0003 backfills existing sessions without changing their creation time."""
     environment = os.environ.copy()
     environment["DATABASE_URL"] = test_database_url
     initial = subprocess.run(
-        ["alembic", "-c", "alembic.ini", "upgrade", INITIAL_REVISION],
+        ["alembic", "-c", "alembic.ini", "upgrade", "0002_exercise_types"],
         cwd=BACKEND_DIRECTORY,
         env=environment,
         text=True,
@@ -156,6 +159,8 @@ def test_exercise_migration_upgrades_an_existing_initial_schema(test_engine, tes
         check=False,
     )
     assert initial.returncode == 0, initial.stderr
+    legacy_session_id = uuid4()
+    created_at = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
     with test_engine.begin() as connection:
         connection.execute(
             text(
@@ -163,11 +168,40 @@ def test_exercise_migration_upgrades_an_existing_initial_schema(test_engine, tes
                 "VALUES ('kot-migration-qa', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb)"
             )
         )
+        user_id = connection.execute(text(
+            "INSERT INTO users (username, email, hashed_password, is_active, is_superuser) "
+            "VALUES ('migration-session-user', 'migration-session-user@example.com', 'hash', true, false) RETURNING id"
+        )).scalar_one()
+        exercise_id = connection.execute(text(
+            "SELECT id FROM exercises WHERE slug = 'singular-nouns'"
+        )).scalar_one()
+        connection.execute(text(
+            "INSERT INTO exercise_sessions (id, exercise_id, user_id, state, created_at, expires_at) "
+            "VALUES (:id, :exercise_id, :user_id, '{}'::jsonb, :created_at, :legacy_expires_at)"
+        ), {
+            "id": legacy_session_id,
+            "exercise_id": exercise_id,
+            "user_id": user_id,
+            "created_at": created_at,
+            "legacy_expires_at": created_at + timedelta(minutes=30),
+        })
 
     upgrade = _migration_command("upgrade", test_database_url)
     assert upgrade.returncode == 0, upgrade.stderr
     with test_engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == HEAD_REVISION
+        columns = set(connection.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = 'exercise_sessions'"
+        )).scalars())
+        assert {"public_id", "revision"} <= columns
+        public_id, revision, migrated_created_at, expires_at = connection.execute(text(
+            "SELECT public_id, revision, created_at, expires_at FROM exercise_sessions WHERE id = :id"
+        ), {"id": legacy_session_id}).one()
+        assert re.fullmatch(r"[A-Za-z0-9_-]{22}", public_id)
+        assert revision == 1
+        assert migrated_created_at == created_at
+        assert expires_at == created_at + timedelta(hours=24)
         catalog = connection.execute(
             text("SELECT slug, type_code, schema_version, status, title, description FROM exercises ORDER BY display_order, id")
         ).mappings().all()
