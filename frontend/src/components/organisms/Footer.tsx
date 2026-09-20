@@ -27,8 +27,8 @@ export const Footer: React.FC<FooterProps> = ({
               Quick Links
             </Typography>
             <div className="space-y-2">
-              <Link href="/lessons" className="block text-gray-600 hover:text-indigo-600">
-                Lessons
+              <Link href="/exercises" className="block text-gray-600 hover:text-indigo-600">
+                Exercises
               </Link>
               <Link href="/about" className="block text-gray-600 hover:text-indigo-600">
                 About

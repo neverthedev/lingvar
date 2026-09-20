@@ -11,8 +11,6 @@ function isAdminPath(pathname: string): boolean {
 function isLearningPath(pathname: string): boolean {
   return pathname === '/exercises'
     || pathname.startsWith('/exercises/')
-    || pathname === '/lessons'
-    || pathname.startsWith('/lessons/')
 }
 
 interface RoleRouteGuardProps {

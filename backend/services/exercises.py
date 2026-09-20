@@ -7,14 +7,18 @@ from these entries; they cannot describe arbitrary tables or SQL.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+import base64
+import secrets
 from typing import Any, Callable
-from uuid import UUID, uuid4
 
 from fastapi import HTTPException
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from sqlalchemy import Float, case, cast, delete, func, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from models.exercise import Exercise, ExerciseSession
 from models.vocabulary import Noun, Numerator, Pronoun, Verb, WordTestStat
@@ -37,8 +41,6 @@ class ExerciseTypeHandler:
     label: str
     definition_model: DefinitionModel
     learner_serializer: ContentSerializer
-    session_creator: Callable[[Session, Exercise, int], ExerciseSession] | None = None
-    blank_checker: Callable[[Session, ExerciseSession, str, str], list[dict[str, Any]]] | None = None
 
 
 @dataclass(frozen=True)
@@ -188,61 +190,11 @@ def _serialize_fill_blanks(_db: Session, definition: dict[str, Any], _user_id: i
     }
 
 
-def _safe_states(state: dict[str, Any]) -> list[dict[str, Any]]:
-    result = []
-    for blank_id, blank in state["blanks"].items():
-        item = {key: blank.get(key) for key in ("value", "attempts_used", "status", "last_check")}
-        item["id"] = blank_id
-        if blank["status"] == "exhausted":
-            item["revealed_answers"] = blank["accepted_answers"]
-        result.append(item)
-    return result
-
-
-def _create_fill_blanks_session(db: Session, exercise: Exercise, user_id: int) -> ExerciseSession:
-    definition = FillBlanksDefinition.model_validate(exercise.definition)
-    now = datetime.now(timezone.utc)
-    db.execute(delete(ExerciseSession).where(ExerciseSession.expires_at <= now))
-    blanks = {
-        part.id: {"accepted_answers": part.accepted_answers, "value": None, "attempts_used": 0, "status": "open", "last_check": None}
-        for item in definition.items
-        for part in item.parts
-        if isinstance(part, BlankPart)
-    }
-    session = ExerciseSession(id=uuid4(), exercise_id=exercise.id, user_id=user_id, state={"blanks": blanks}, expires_at=now + timedelta(hours=24))
-    db.add(session)
-    db.commit()
-    db.refresh(session)
-    return session
-
-
-def _check_fill_blank(_db: Session, session: ExerciseSession, blank_id: str, answer: str) -> list[dict[str, Any]]:
-    if not answer.strip():
-        raise _validation_error(["answer"], "Ответ не может быть пустым")
-    state = dict(session.state)
-    blanks = dict(state.get("blanks", {}))
-    blank = blanks.get(blank_id)
-    if blank is None:
-        raise HTTPException(status_code=404, detail="Пропуск не найден")
-    if blank["status"] != "open":
-        raise HTTPException(status_code=409, detail="Пропуск уже закрыт")
-    blank = dict(blank)
-    blank["value"] = answer
-    blank["attempts_used"] += 1
-    correct = answer.strip().casefold() in {candidate.strip().casefold() for candidate in blank["accepted_answers"]}
-    blank["last_check"] = "correct" if correct else "incorrect"
-    blank["status"] = "correct" if correct else ("exhausted" if blank["attempts_used"] >= 3 else "open")
-    blanks[blank_id] = blank
-    state["blanks"] = blanks
-    session.state = state
-    return _safe_states(state)
-
-
 TYPE_REGISTRY: dict[tuple[str, int], ExerciseTypeHandler] = {
     ("form_table", 1): ExerciseTypeHandler("Таблица форм", FormTableDefinition, _serialize_vocabulary_source),
     ("single_input", 1): ExerciseTypeHandler("Ввод одной формы", SingleInputDefinition, _serialize_vocabulary_source),
     ("self_check", 1): ExerciseTypeHandler("Самопроверка", SelfCheckDefinition, _serialize_vocabulary_source),
-    ("fill_blanks", 1): ExerciseTypeHandler("Заполнение пропусков", FillBlanksDefinition, _serialize_fill_blanks, _create_fill_blanks_session, _check_fill_blank),
+    ("fill_blanks", 1): ExerciseTypeHandler("Заполнение пропусков", FillBlanksDefinition, _serialize_fill_blanks),
 }
 
 
@@ -308,32 +260,328 @@ def exercise_detail(db: Session, slug: str, user_id: int) -> dict[str, Any]:
     return TypeAdapter(LearnerExerciseResponse).validate_python(response).model_dump(mode="json", exclude_unset=True)
 
 
-def create_exercise_session(db: Session, exercise: Exercise, user_id: int) -> ExerciseSession:
-    handler = _type_handler(exercise.type_code, exercise.schema_version)
-    if handler.session_creator is None:
+SESSION_TTL = timedelta(hours=24)
+
+
+def _not_found() -> HTTPException:
+    # Deliberately identical for malformed, expired, foreign and wrong-exercise IDs.
+    return HTTPException(status_code=404, detail="Сессия не найдена")
+
+
+def _public_id() -> str:
+    return base64.urlsafe_b64encode(secrets.token_bytes(16)).rstrip(b"=").decode("ascii")
+
+
+def _metadata(exercise: Exercise) -> dict[str, Any]:
+    return {
+        "slug": exercise.slug,
+        "title": exercise.title,
+        "description": exercise.description,
+        "instruction": exercise.instruction,
+        "difficulty": exercise.difficulty,
+        "estimated_duration_minutes": exercise.estimated_duration_minutes,
+        "type_code": exercise.type_code,
+        "schema_version": exercise.schema_version,
+    }
+
+
+def _blank_state() -> dict[str, Any]:
+    return {"value": None, "attempts_used": 0, "status": "open", "last_check": None}
+
+
+def _session_state(db: Session, exercise: Exercise, user_id: int) -> dict[str, Any]:
+    """Create the immutable content snapshot and its server-only answer key."""
+    raw_content = load_content(db, exercise, user_id)
+    state: dict[str, Any] = {"metadata": _metadata(exercise)}
+
+    if exercise.type_code == "form_table":
+        rows = raw_content["rows"]
+        state["content"] = {**raw_content, "rows": [{key: value for key, value in row.items() if key != "answers"} for row in rows]}
+        state["answers"] = {str(row["id"]): row["answers"] for row in rows}
+        state["progress"] = {
+            "cells": {
+                f"{row['id']}:{column['key']}": _blank_state()
+                for row in rows for column in raw_content["columns"]
+            },
+            "rows": {
+                str(row["id"]): {"completed": False, "all_correct": None, "weight": row.get("weight", 0)}
+                for row in rows
+            },
+        }
+    elif exercise.type_code == "single_input":
+        items = raw_content["items"]
+        state["content"] = {**raw_content, "items": [{key: value for key, value in item.items() if key != "answer"} for item in items]}
+        state["answers"] = {str(item["id"]): item["answer"] for item in items}
+        state["progress"] = {"items": {str(item["id"]): _blank_state() for item in items}}
+    elif exercise.type_code == "self_check":
+        items = raw_content["items"]
+        state["content"] = {"items": [{key: value for key, value in item.items() if key != "answer"} for item in items]}
+        state["answers"] = {str(item["id"]): item["answer"] for item in items}
+        state["progress"] = {"items": {str(item["id"]): {"revealed": False, "result": None} for item in items}}
+    elif exercise.type_code == "fill_blanks":
+        definition = FillBlanksDefinition.model_validate(exercise.definition)
+        state["content"] = raw_content
+        state["answers"] = {
+            part.id: part.accepted_answers
+            for item in definition.items for part in item.parts if isinstance(part, BlankPart)
+        }
+        state["progress"] = {"blanks": {
+            part_id: _blank_state() for part_id in state["answers"]
+        }}
+    else:
         raise _validation_error(["type_code"], "Серверная сессия недоступна для этого типа упражнения")
-    return handler.session_creator(db, exercise, user_id)
+    return state
 
 
-def check_blank(db: Session, session_id: UUID, user_id: int, blank_id: str, answer: str) -> list[dict[str, Any]]:
+def _public_progress(state: dict[str, Any]) -> dict[str, Any]:
+    progress = deepcopy(state["progress"])
+    if state["metadata"]["type_code"] == "form_table":
+        for cell_key, cell in progress["cells"].items():
+            if cell["status"] == "exhausted":
+                row_id, column_key = cell_key.split(":", 1)
+                cell["revealed_answer"] = state["answers"][row_id][column_key]
+    if state["metadata"]["type_code"] == "self_check":
+        for item_id, item in progress["items"].items():
+            if item["revealed"]:
+                item["answer"] = state["answers"][item_id]
+    if state["metadata"]["type_code"] == "single_input":
+        for item_id, item in progress["items"].items():
+            if item["status"] == "exhausted":
+                item["revealed_answer"] = state["answers"][item_id]
+    if state["metadata"]["type_code"] == "fill_blanks":
+        for blank_id, blank in progress["blanks"].items():
+            if blank["status"] == "exhausted":
+                blank["revealed_answers"] = state["answers"][blank_id]
+    return progress
+
+
+def _payload(session: ExerciseSession) -> dict[str, Any]:
+    state = session.state
+    return {
+        "session_id": session.public_id,
+        "expires_at": session.expires_at,
+        "revision": session.revision,
+        **deepcopy(state["metadata"]),
+        "content": deepcopy(state["content"]),
+        "progress": _public_progress(state),
+    }
+
+
+def _new_session(db: Session, exercise: Exercise, user_id: int) -> ExerciseSession:
     now = datetime.now(timezone.utc)
-    # Commit cleanup independently: malformed request data must not retain other
-    # expired sessions by rolling back the transaction.
-    db.execute(delete(ExerciseSession).where(ExerciseSession.expires_at <= now, ExerciseSession.id != session_id))
-    db.commit()
-    session = db.query(ExerciseSession).filter(ExerciseSession.id == session_id, ExerciseSession.user_id == user_id).with_for_update().first()
+    state = _session_state(db, exercise, user_id)
+    # The unique index is the final collision guard. A savepoint makes the
+    # astronomically rare retry safe without rolling back the caller's work.
+    while True:
+        session = ExerciseSession(
+            public_id=_public_id(), exercise_id=exercise.id, user_id=user_id,
+            state=state, created_at=now, expires_at=now + SESSION_TTL, revision=1,
+        )
+        try:
+            with db.begin_nested():
+                db.add(session)
+                db.flush()
+            return session
+        except IntegrityError as error:
+            diagnostic = getattr(error.orig, "diag", None)
+            if getattr(diagnostic, "constraint_name", None) != "uq_exercise_sessions_public_id":
+                raise
+
+
+def _active_session(db: Session, slug: str, public_id: str, user_id: int, *, lock: bool) -> ExerciseSession:
+    query = db.query(ExerciseSession).join(Exercise, ExerciseSession.exercise_id == Exercise.id).filter(
+        ExerciseSession.public_id == public_id, ExerciseSession.user_id == user_id, Exercise.slug == slug,
+    )
+    session = (query.with_for_update() if lock else query).first()
     if session is None:
-        raise HTTPException(status_code=404, detail="Сессия не найдена")
-    if session.expires_at <= now:
+        raise _not_found()
+    if session.expires_at <= datetime.now(timezone.utc):
         db.delete(session)
         db.commit()
-        raise HTTPException(status_code=410, detail="Сессия упражнения истекла")
-    exercise = db.get(Exercise, session.exercise_id)
+        raise _not_found()
+    return session
+
+
+def create_session(db: Session, slug: str, user_id: int) -> dict[str, Any]:
+    exercise = db.query(Exercise).filter(Exercise.slug == slug, Exercise.status == "published").first()
     if exercise is None:
         raise HTTPException(status_code=404, detail="Упражнение не найдено")
-    checker = _type_handler(exercise.type_code, exercise.schema_version).blank_checker
-    if checker is None:
-        raise _validation_error(["blank_id"], "Проверка пропусков недоступна для этого типа упражнения")
-    states = checker(db, session, blank_id, answer)
+    session = _new_session(db, exercise, user_id)
     db.commit()
-    return states
+    db.refresh(session)
+    return _payload(session)
+
+
+def get_session(db: Session, slug: str, public_id: str, user_id: int) -> dict[str, Any]:
+    return _payload(_active_session(db, slug, public_id, user_id, lock=False))
+
+
+def restart_session(db: Session, slug: str, public_id: str, user_id: int) -> dict[str, Any]:
+    exercise = db.query(Exercise).filter(Exercise.slug == slug, Exercise.status == "published").first()
+    if exercise is None:
+        raise HTTPException(status_code=404, detail="Упражнение не найдено")
+    try:
+        session = _active_session(db, slug, public_id, user_id, lock=True)
+    except HTTPException as error:
+        if error.status_code != 404:
+            raise
+    else:
+        db.delete(session)
+        db.flush()
+    fresh = _new_session(db, exercise, user_id)
+    db.commit()
+    db.refresh(fresh)
+    return _payload(fresh)
+
+
+def _word_stat(db: Session, user_id: int, word_type: str, word_id: int) -> WordTestStat:
+    stat = db.query(WordTestStat).filter_by(user_id=user_id, word_type=word_type, word_id=word_id).with_for_update().first()
+    if stat is None:
+        stat = WordTestStat(user_id=user_id, word_type=word_type, word_id=word_id, attempts=0, correct=0, last_correct=False, weight=0)
+        db.add(stat)
+    return stat
+
+
+def _require_open_check(entry: dict[str, Any], expected_attempts: int) -> bool:
+    """Return false for a repeated stale request, otherwise validate openness."""
+    if expected_attempts != entry["attempts_used"]:
+        return False
+    if entry["status"] != "open":
+        raise HTTPException(status_code=409, detail="Ответ уже закрыт")
+    return True
+
+
+def _check_answer(entry: dict[str, Any], answer: str, accepted_answers: list[str] | str, max_attempts: int = 3) -> bool:
+    if not answer.strip():
+        raise _validation_error(["answer"], "Ответ не может быть пустым")
+    candidates = accepted_answers if isinstance(accepted_answers, list) else [accepted_answers]
+    correct = answer.strip().casefold() in {candidate.strip().casefold() for candidate in candidates}
+    entry["value"] = answer
+    entry["attempts_used"] += 1
+    entry["last_check"] = "correct" if correct else "incorrect"
+    entry["status"] = "correct" if correct else ("exhausted" if entry["attempts_used"] >= max_attempts else "open")
+    return correct
+
+
+def _form_check(db: Session, session: ExerciseSession, action: dict[str, Any]) -> bool:
+    state = session.state
+    row_id, column_key = str(action["row_id"]), action["column_key"]
+    answers = state["answers"].get(row_id)
+    if answers is None or column_key not in answers:
+        raise HTTPException(status_code=409, detail="Ячейка не входит в снимок сессии")
+    cell = state["progress"]["cells"][f"{row_id}:{column_key}"]
+    if not _require_open_check(cell, action["expected_attempts_used"]):
+        return False
+    correct = _check_answer(cell, action["answer"], answers[column_key])
+    meta = state["metadata"]
+    stat = _word_stat(db, session.user_id, state["content"]["statistics_word_type"], int(row_id))
+    stat.attempts += 1
+    if correct:
+        stat.correct += 1
+    stat.last_correct = False
+    columns = state["content"]["columns"]
+    row_progress = state["progress"]["rows"][row_id]
+    cells = state["progress"]["cells"]
+    if not row_progress["completed"] and all(cells[f"{row_id}:{column['key']}"]["status"] != "open" for column in columns):
+        row_progress["completed"] = True
+        row_progress["all_correct"] = all(cells[f"{row_id}:{column['key']}"]["status"] == "correct" for column in columns)
+        stat.last_tested_at = func.now()
+        stat.last_correct = row_progress["all_correct"]
+    return True
+
+
+def _form_weight(db: Session, session: ExerciseSession, action: dict[str, Any]) -> bool:
+    row_id = str(action["row_id"])
+    row = session.state["progress"]["rows"].get(row_id)
+    if row is None:
+        raise HTTPException(status_code=409, detail="Строка не входит в снимок сессии")
+    stat = _word_stat(db, session.user_id, session.state["content"]["statistics_word_type"], int(row_id))
+    stat.weight = max(-5, min(5, (stat.weight or 0) + (1 if action["direction"] == "up" else -1)))
+    row["weight"] = stat.weight
+    return True
+
+
+def _single_check(session: ExerciseSession, action: dict[str, Any]) -> bool:
+    item_id = str(action["item_id"])
+    item = session.state["progress"]["items"].get(item_id)
+    answer = session.state["answers"].get(item_id)
+    if item is None or answer is None:
+        raise HTTPException(status_code=409, detail="Задание не входит в снимок сессии")
+    if not _require_open_check(item, action["expected_attempts_used"]):
+        return False
+    _check_answer(item, action["answer"], answer)
+    return True
+
+
+def _self_reveal(session: ExerciseSession, action: dict[str, Any]) -> bool:
+    item = session.state["progress"]["items"].get(str(action["item_id"]))
+    if item is None:
+        raise HTTPException(status_code=409, detail="Задание не входит в снимок сессии")
+    if item["revealed"]:
+        return False
+    item["revealed"] = True
+    return True
+
+
+def _self_mark(session: ExerciseSession, action: dict[str, Any]) -> bool:
+    item = session.state["progress"]["items"].get(str(action["item_id"]))
+    if item is None:
+        raise HTTPException(status_code=409, detail="Задание не входит в снимок сессии")
+    if not item["revealed"]:
+        raise HTTPException(status_code=409, detail="Сначала покажите ответ")
+    if item["result"] is not None:
+        return False
+    item["result"] = action["result"]
+    return True
+
+
+def _fill_check(session: ExerciseSession, action: dict[str, Any]) -> bool:
+    blank_id = action["blank_id"]
+    blank = session.state["progress"]["blanks"].get(blank_id)
+    answers = session.state["answers"].get(blank_id)
+    if blank is None or answers is None:
+        raise HTTPException(status_code=409, detail="Пропуск не входит в снимок сессии")
+    if not _require_open_check(blank, action["expected_attempts_used"]):
+        return False
+    _check_answer(blank, action["answer"], answers)
+    return True
+
+
+def apply_session_action(db: Session, slug: str, public_id: str, user_id: int, action: dict[str, Any]) -> dict[str, Any]:
+    session = _active_session(db, slug, public_id, user_id, lock=True)
+    action_type = action["action"]
+    type_code = session.state["metadata"]["type_code"]
+    handlers: dict[str, tuple[str, Callable[..., bool]]] = {
+        "form_table_check": ("form_table", _form_check),
+        "form_table_weight": ("form_table", _form_weight),
+        "single_input_check": ("single_input", _single_check),
+        "self_check_reveal": ("self_check", _self_reveal),
+        "self_check_mark": ("self_check", _self_mark),
+        "fill_blank_check": ("fill_blanks", _fill_check),
+    }
+    expected_type, handler = handlers[action_type]
+    if expected_type != type_code:
+        raise HTTPException(status_code=409, detail="Действие несовместимо с упражнением")
+    changed = handler(db, session, action) if action_type.startswith("form_") else handler(session, action)
+    if changed:
+        # JSONB does not track mutations below the top-level dict. All action
+        # handlers update their nested progress in place, so explicitly mark
+        # the attribute dirty before committing the session and related stats.
+        flag_modified(session, "state")
+        session.revision += 1
+        db.commit()
+        db.refresh(session)
+    return _payload(session)
+
+
+# Legacy endpoint compatibility for clients that still call the old fill-blank URL.
+def check_blank(db: Session, public_id: str, user_id: int, blank_id: str, answer: str) -> list[dict[str, Any]]:
+    session = db.query(ExerciseSession).filter(ExerciseSession.public_id == public_id, ExerciseSession.user_id == user_id).first()
+    if session is None or session.state["metadata"]["type_code"] != "fill_blanks":
+        raise _not_found()
+    slug = session.state["metadata"]["slug"]
+    result = apply_session_action(db, slug, public_id, user_id, {
+        "action": "fill_blank_check", "blank_id": blank_id, "answer": answer,
+        "expected_attempts_used": session.state["progress"]["blanks"].get(blank_id, {}).get("attempts_used", 0),
+    })
+    return [{"id": key, **value} for key, value in result["progress"]["blanks"].items()]

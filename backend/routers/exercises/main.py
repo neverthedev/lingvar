@@ -1,6 +1,4 @@
-from uuid import UUID
-
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from .dopelniacz import router as dopelniacz_router
 from .numerators import router as numerators_router
@@ -9,8 +7,15 @@ from models.exercise import Exercise
 from models.user import User as DBUser
 from services.auth import get_current_student_user
 from services.database import get_db
-from services.exercises import _safe_states, check_blank, create_exercise_session, exercise_detail
-from schemas.exercises import BlankCheckRequest, LearnerCatalogItem, LearnerExerciseResponse
+from services.exercises import (
+    apply_session_action,
+    check_blank,
+    create_session as create_session_state,
+    exercise_detail,
+    get_session,
+    restart_session,
+)
+from schemas.exercises import BlankCheckRequest, LearnerCatalogItem, LearnerExerciseResponse, SessionActionRequest
 
 # Main exercises router
 router = APIRouter(
@@ -38,16 +43,27 @@ async def get_exercise_content(slug: str, current_user: DBUser = Depends(get_cur
 
 @router.post("/{slug}/sessions", status_code=status.HTTP_201_CREATED, tags=["exercises"])
 async def create_session(slug: str, current_user: DBUser = Depends(get_current_student_user), db: Session = Depends(get_db)):
-    exercise = db.query(Exercise).filter(Exercise.slug == slug, Exercise.status == "published").first()
-    if exercise is None:
-        raise HTTPException(status_code=404, detail="Упражнение не найдено")
-    session = create_exercise_session(db, exercise, current_user.id)
-    return {"session_id": str(session.id), "expires_at": session.expires_at, "blanks": _safe_states(session.state)}
+    return create_session_state(db, slug, current_user.id)
+
+
+@router.get("/{slug}/sessions/{session_id}", tags=["exercises"])
+async def get_session_state(slug: str, session_id: str, current_user: DBUser = Depends(get_current_student_user), db: Session = Depends(get_db)):
+    return get_session(db, slug, session_id, current_user.id)
+
+
+@router.post("/{slug}/sessions/{session_id}/actions", tags=["exercises"])
+async def session_action(slug: str, session_id: str, payload: SessionActionRequest, current_user: DBUser = Depends(get_current_student_user), db: Session = Depends(get_db)):
+    return apply_session_action(db, slug, session_id, current_user.id, payload.model_dump())
+
+
+@router.post("/{slug}/sessions/{session_id}/restart", tags=["exercises"])
+async def restart_session_state(slug: str, session_id: str, current_user: DBUser = Depends(get_current_student_user), db: Session = Depends(get_db)):
+    return restart_session(db, slug, session_id, current_user.id)
 
 
 session_router = APIRouter(prefix="/api/exercise-sessions", dependencies=[Depends(get_current_student_user)])
 
 
 @session_router.post("/{session_id}/blanks/{blank_id}/check", tags=["exercises"])
-async def check_session_blank(session_id: UUID, blank_id: str, payload: BlankCheckRequest, current_user: DBUser = Depends(get_current_student_user), db: Session = Depends(get_db)):
+async def check_session_blank(session_id: str, blank_id: str, payload: BlankCheckRequest, current_user: DBUser = Depends(get_current_student_user), db: Session = Depends(get_db)):
     return {"blanks": check_blank(db, session_id, current_user.id, blank_id, payload.answer)}

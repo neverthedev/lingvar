@@ -8,3 +8,4 @@
 | TASK-004 | [Начальный контур администратора](tasks/TASK-004.md) | `task-04-admin-exercises` | ожидает ревью PO |
 | TASK-005 | [Управление иерархией правил администратора](tasks/TASK-005.md) | `task-05-admin-rule-crud` | завершена |
 | TASK-006 | [Упражнения разных типов в админке](tasks/TASK-006.md) | `task-06-admin-exercise-types` | завершена |
+| TASK-007 | [Сохранение сессии и обновление интерфейса падежного упражнения](tasks/TASK-007.md) | `task-07-exercise-session-ui` | завершена |

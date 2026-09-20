@@ -11,10 +11,7 @@ export {
   SignupForm,
   Breadcrumb,
   UserMenu,
-  LessonCard,
-  ExerciseCard,
-  LessonSection,
-  LessonNavigation
+  ExerciseCard
 } from './molecules'
 
 // Organisms - Complex components
@@ -25,6 +22,3 @@ export * from './templates'
 
 // Pages - Specific page implementations
 export * from './pages'
-
-// Legacy components (to be migrated)
-export { default as LessonLoading } from './LessonLoading'

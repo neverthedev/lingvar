@@ -1,56 +1,93 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { Button, Input, InteractiveLessonTable, Typography } from '@/components'
-import { API_ENDPOINTS, AuthService, ExerciseContent } from '@/lib/api'
+import { useRef, useState } from 'react'
+import { Button, Input } from '@/components'
+import { AnswerState, ExerciseSessionAction, ExerciseSessionSnapshot } from '@/lib/api'
 
-type BlankState = { id: string; value: string | null; attempts_used: number; status: 'open' | 'correct' | 'exhausted'; last_check: 'correct' | 'incorrect' | null; revealed_answers?: string[] }
-
-function FormTable({ exercise }: { exercise: Extract<ExerciseContent, {type_code: 'form_table'}> }) {
-  const rows = exercise.content.rows.map(row => ({ id: row.id, word: row.prompt, ...row.answers, weight: row.weight }))
-  return <InteractiveLessonTable data={rows} cases={exercise.content.columns.map(column => ({ key: column.key, name: column.label }))} wordType={exercise.content.statistics_word_type} title={exercise.title} description={exercise.instruction} />
+type RendererProps = { exercise: ExerciseSessionSnapshot; onAction: (action: ExerciseSessionAction) => Promise<void> }
+type TypeRendererProps<T extends ExerciseSessionSnapshot['type_code']> = {
+  exercise: Extract<ExerciseSessionSnapshot, { type_code: T }>
+  onAction: RendererProps['onAction']
 }
 
-function SingleInput({ exercise }: { exercise: Extract<ExerciseContent, {type_code: 'single_input'}> }) {
-  const [items, setItems] = useState(exercise.content.items.map(item => ({ ...item, input: '', attempts: 0, status: 'open' as 'open'|'correct'|'exhausted' })))
-  const check = (id: number) => setItems(previous => previous.map(item => {
-    if (item.id !== id || item.status !== 'open') return item
-    const attempts = item.attempts + 1
-    if (item.input.trim().toLowerCase() === item.answer.toLowerCase()) return { ...item, attempts, status: 'correct' }
-    return { ...item, attempts, input: attempts >= 3 ? item.input : '', status: attempts >= 3 ? 'exhausted' : 'open' }
-  }))
-  return <div className="space-y-4">{items.map(item => <div key={item.id} className="rounded border p-4"><p className="mb-2 font-medium">{item.prompt}</p>{item.status === 'open' ? <div className="flex gap-2"><Input value={item.input} onChange={event => setItems(current => current.map(value => value.id === item.id ? {...value, input: event.target.value} : value))} onKeyDown={event => { if (event.key === 'Enter' && item.input.trim()) check(item.id) }} /><Button size="sm" onClick={() => check(item.id)} disabled={!item.input.trim()}>Проверить</Button><span>{item.attempts}/3</span></div> : <p className={item.status === 'correct' ? 'text-green-700' : 'text-red-700'}>{item.status === 'exhausted' && <span className="mr-2 line-through">{item.input}</span>}{item.answer}</p>}</div>)}</div>
-}
+const answerClass = (state: AnswerState) => state.status === 'correct'
+  ? 'border-green-400 bg-green-50 text-green-900'
+  : state.status === 'exhausted' ? 'border-red-400 bg-red-50 text-red-900' : ''
 
-function SelfCheck({ exercise }: { exercise: Extract<ExerciseContent, {type_code: 'self_check'}> }) {
-  const [items, setItems] = useState(exercise.content.items.map(item => ({...item, shown: false, result: null as null|'correct'|'incorrect'})))
-  const correct = items.filter(item => item.result === 'correct').length
-  const incorrect = items.filter(item => item.result === 'incorrect').length
-  return <div className="space-y-4"><div className="rounded bg-gray-100 p-3 text-sm">Верно: {correct} · Неверно: {incorrect} · Осталось: {items.length - correct - incorrect}</div>{items.map(item => <div key={item.id} className={`rounded border p-4 ${item.result === 'correct' ? 'border-green-300 bg-green-50' : item.result === 'incorrect' ? 'border-red-300 bg-red-50' : ''}`}><p className="font-medium">{item.prompt}</p>{!item.shown ? <Button size="sm" className="mt-2" onClick={() => setItems(all => all.map(value => value.id === item.id ? {...value, shown: true} : value))}>Показать ответ</Button> : <><p className="mt-2">{item.answer}</p>{item.result === null ? <div className="mt-2 flex gap-2"><Button size="sm" onClick={() => setItems(all => all.map(value => value.id === item.id ? {...value, result:'correct'} : value))}>Верно</Button><Button size="sm" variant="secondary" onClick={() => setItems(all => all.map(value => value.id === item.id ? {...value, result:'incorrect'} : value))}>Неверно</Button></div> : <p className={item.result === 'correct' ? 'mt-2 text-green-700' : 'mt-2 text-red-700'}>{item.result === 'correct' ? 'Отмечено: верно' : 'Отмечено: неверно'}</p>}</>}</div>)}</div>
-}
-
-function FillBlanks({ exercise }: { exercise: Extract<ExerciseContent, {type_code: 'fill_blanks'}> }) {
-  const started = useRef(false)
-  const [sessionId, setSessionId] = useState<string | null>(null)
-  const [states, setStates] = useState<Record<string, BlankState>>({})
-  const [values, setValues] = useState<Record<string, string>>({})
+function FormTable({ exercise, onAction }: TypeRendererProps<'form_table'>) {
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [editing, setEditing] = useState<string | null>(null)
   const [pending, setPending] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  useEffect(() => { if (started.current) return; started.current = true; void (async () => { try { const response = await fetch(`${API_ENDPOINTS.exercises}${exercise.slug}/sessions`, {method:'POST',headers:AuthService.getAuthHeaders()}); if (!response.ok) throw new Error('Не удалось начать упражнение'); const data = await response.json(); setSessionId(data.session_id); setStates(Object.fromEntries(data.blanks.map((state: BlankState) => [state.id, state]))); } catch (reason) { setError(reason instanceof Error ? reason.message : 'Не удалось начать упражнение') } })() }, [exercise.slug])
-  const check = async (id: string) => { if (!sessionId) return; setPending(id); setError(null); try { const response = await fetch(`${API_ENDPOINTS.exerciseSessions}/${sessionId}/blanks/${id}/check`, {method:'POST',headers:AuthService.getAuthHeaders(),body:JSON.stringify({answer: values[id] ?? ''})}); if (response.status === 410) throw new Error('Сессия истекла. Обновите страницу, чтобы начать заново.'); const data = await response.json(); if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Не удалось проверить ответ'); setStates(Object.fromEntries(data.blanks.map((state: BlankState) => [state.id, state]))); } catch (reason) { setError(reason instanceof Error ? reason.message : 'Не удалось проверить ответ') } finally { setPending(null) } }
-  return <div className="space-y-6">{error && <p className="text-red-700">{error}</p>}{exercise.content.items.map(item => <div key={item.id} className="leading-10">{item.parts.map((part, index) => part.kind === 'text' ? <span key={index}>{part.text}</span> : (() => { const state = states[part.id]; const closed = state && state.status !== 'open'; const inputValue = closed ? (state?.value ?? '') : (values[part.id] ?? state?.value ?? ''); return <span key={part.id} className="inline-flex items-center gap-1"><Input className="inline-block w-40" value={inputValue} disabled={closed || pending === part.id} onChange={event => setValues(previous => ({...previous,[part.id]:event.target.value}))} placeholder={part.hint || 'Ответ'} /><Button size="sm" onClick={() => check(part.id)} disabled={closed || pending === part.id || !inputValue.trim()}>Проверить</Button>{state && <small className={state.last_check === 'incorrect' ? 'text-red-700' : 'text-green-700'}>{state.attempts_used}/3 {state.status === 'correct' && '✓'} {state.revealed_answers && `Ответ: ${state.revealed_answers.join(', ')}`}</small>}</span> })())}</div>)}</div>
+  const progress = exercise.progress as Extract<typeof exercise.progress, { cells: Record<string, AnswerState> }>
+  const submit = async (rowId: number, column: string) => {
+    const key = `${rowId}:${column}`, state = progress.cells[key], answer = drafts[key] ?? state.value ?? ''
+    if (!answer.trim() || state.status !== 'open') return
+    setPending(key); setError(null)
+    try { await onAction({ action: 'form_table_check', row_id: rowId, column_key: column, answer, expected_attempts_used: state.attempts_used }); setEditing(null) }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'Не удалось проверить ответ') }
+    finally { setPending(null) }
+  }
+  const changeWeight = async (rowId: number, direction: 'up' | 'down') => {
+    const key = `weight-${rowId}`
+    setPending(key); setError(null)
+    try { await onAction({ action: 'form_table_weight', row_id: rowId, direction }) }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'Не удалось изменить приоритет') }
+    finally { setPending(null) }
+  }
+  return <div className="space-y-3 overflow-x-auto">
+    {error && <p className="text-sm text-red-700" role="alert">{error}</p>}
+    <table className="w-full border-collapse text-sm"><thead><tr className="bg-gray-50"><th className="border p-3 text-left">Слово</th>{exercise.content.columns.map(column => <th className="border p-3 text-left" key={column.key}>{column.label}</th>)}</tr></thead><tbody>{exercise.content.rows.map(row => <tr key={row.id}><td className="border p-3 font-medium"><div className="flex items-center gap-2"><span>{row.prompt}</span><span className="inline-flex items-center gap-1"><button type="button" disabled={pending === `weight-${row.id}`} aria-label={`Повысить приоритет ${row.prompt}`} onClick={() => void changeWeight(row.id, 'up')}>▲</button><span>{progress.rows[String(row.id)]?.weight ?? row.weight ?? 0}</span><button type="button" disabled={pending === `weight-${row.id}`} aria-label={`Понизить приоритет ${row.prompt}`} onClick={() => void changeWeight(row.id, 'down')}>▼</button></span></div></td>{exercise.content.columns.map(column => { const key = `${row.id}:${column.key}`, state = progress.cells[key], closed = state.status !== 'open'; return <td className={`border p-2 ${answerClass(state)}`} key={key}>{closed ? <span>{state.status === 'exhausted' && state.revealed_answer ? state.revealed_answer : state.value}</span> : editing === key ? <div className="flex min-w-44 gap-1"><Input value={drafts[key] ?? state.value ?? ''} onChange={event => setDrafts(current => ({ ...current, [key]: event.target.value }))} onKeyDown={event => { if (event.key === 'Enter') void submit(row.id, column.key); if (event.key === 'Escape') setEditing(null) }} autoFocus /><Button size="sm" disabled={pending === key} onClick={() => void submit(row.id, column.key)}>OK</Button></div> : <button type="button" className="w-full text-left text-gray-500" onClick={() => setEditing(key)}>Заполнить</button>}</td>})}</tr>)}</tbody></table>
+  </div>
 }
 
-const renderers = {
-  form_table: FormTable,
-  single_input: SingleInput,
-  self_check: SelfCheck,
-  fill_blanks: FillBlanks,
-} as const
+function SingleInput({ exercise, onAction }: TypeRendererProps<'single_input'>) {
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [pending, setPending] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const progress = exercise.progress as Extract<typeof exercise.progress, { items: Record<string, AnswerState> }>
+  const submit = async (itemId: number) => { const state = progress.items[String(itemId)], answer = drafts[String(itemId)] ?? state.value ?? ''; if (!answer.trim() || state.status !== 'open') return; setPending(String(itemId)); setError(null); try { await onAction({ action: 'single_input_check', item_id: itemId, answer, expected_attempts_used: state.attempts_used }) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Не удалось проверить ответ') } finally { setPending(null) } }
+  return <div className="space-y-4">{error && <p className="text-sm text-red-700" role="alert">{error}</p>}{exercise.content.items.map(item => { const state = progress.items[String(item.id)], closed = state.status !== 'open'; return <div key={item.id} className={`rounded border p-4 ${answerClass(state)}`}><p className="mb-2 font-medium">{item.prompt}</p>{closed ? <p>{state.status === 'exhausted' ? state.revealed_answer : state.value}</p> : <div className="flex flex-wrap items-center gap-2"><Input value={drafts[String(item.id)] ?? state.value ?? ''} onChange={event => setDrafts(current => ({ ...current, [String(item.id)]: event.target.value }))} onKeyDown={event => { if (event.key === 'Enter') void submit(item.id) }} /><Button size="sm" disabled={pending === String(item.id)} onClick={() => void submit(item.id)}>Проверить</Button><span className="text-sm text-gray-600">{state.attempts_used}/3</span></div>}</div>})}</div>
+}
 
-export function ExerciseRenderer({ exercise }: { exercise: ExerciseContent }) {
-  const Renderer = renderers[exercise.type_code] as (props: {exercise: any}) => JSX.Element
-  // Navigation between two slugs can preserve this route component in Next.js.
-  // A slug is a new learner run, even when its renderer type is unchanged.
-  return <Renderer key={exercise.slug} exercise={exercise} />
+function SelfCheck({ exercise, onAction }: TypeRendererProps<'self_check'>) {
+  const [pending, setPending] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const progress = exercise.progress as Extract<typeof exercise.progress, { items: Record<string, { revealed: boolean; result: 'correct' | 'incorrect' | null; answer?: string }> }>
+  const act = async (key: string, action: ExerciseSessionAction) => { setPending(key); setError(null); try { await onAction(action) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Не удалось сохранить результат') } finally { setPending(null) } }
+  const values = Object.values(progress.items), correct = values.filter(item => item.result === 'correct').length, incorrect = values.filter(item => item.result === 'incorrect').length
+  return <div className="space-y-4">{error && <p className="text-sm text-red-700" role="alert">{error}</p>}<div className="rounded bg-gray-100 p-3 text-sm">Верно: {correct} · Неверно: {incorrect} · Осталось: {values.length - correct - incorrect}</div>{exercise.content.items.map(item => { const state = progress.items[String(item.id)]; return <div key={item.id} className={`rounded border p-4 ${state.result === 'correct' ? 'border-green-300 bg-green-50' : state.result === 'incorrect' ? 'border-red-300 bg-red-50' : ''}`}><p className="font-medium">{item.prompt}</p>{!state.revealed ? <Button size="sm" className="mt-2" disabled={pending === `reveal-${item.id}`} onClick={() => void act(`reveal-${item.id}`, { action: 'self_check_reveal', item_id: item.id })}>Показать ответ</Button> : <><p className="mt-2">{state.answer}</p>{state.result === null ? <div className="mt-2 flex gap-2"><Button size="sm" disabled={pending === `mark-${item.id}`} onClick={() => void act(`mark-${item.id}`, { action: 'self_check_mark', item_id: item.id, result: 'correct' })}>Верно</Button><Button size="sm" variant="secondary" disabled={pending === `mark-${item.id}`} onClick={() => void act(`mark-${item.id}`, { action: 'self_check_mark', item_id: item.id, result: 'incorrect' })}>Неверно</Button></div> : <p className={state.result === 'correct' ? 'mt-2 text-green-700' : 'mt-2 text-red-700'}>{state.result === 'correct' ? 'Отмечено: верно' : 'Отмечено: неверно'}</p>}</>}</div>})}</div>
+}
+
+function FillBlanks({ exercise, onAction }: TypeRendererProps<'fill_blanks'>) {
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [pending, setPending] = useState<Set<string>>(() => new Set())
+  const pendingRef = useRef<Set<string>>(new Set())
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const progress = exercise.progress as Extract<typeof exercise.progress, { blanks: Record<string, AnswerState> }>
+  const submit = async (blankId: string) => {
+    const state = progress.blanks[blankId], answer = drafts[blankId] ?? state.value ?? ''
+    if (!answer.trim() || state.status !== 'open' || pendingRef.current.has(blankId) || answer === (state.value ?? '')) return
+    pendingRef.current.add(blankId)
+    setPending(current => new Set(current).add(blankId)); setErrors(current => { const next = { ...current }; delete next[blankId]; return next })
+    try { await onAction({ action: 'fill_blank_check', blank_id: blankId, answer, expected_attempts_used: state.attempts_used }) }
+    catch (reason) { setErrors(current => ({ ...current, [blankId]: reason instanceof Error ? reason.message : 'Проверка не выполнена.' })) }
+    finally { pendingRef.current.delete(blankId); setPending(current => { const next = new Set(current); next.delete(blankId); return next }) }
+  }
+  const status = (state: AnswerState, blankId: string) => {
+    if (pending.has(blankId)) return <p className="mt-1 text-sm text-gray-600" role="status">◌ Проверяем…</p>
+    if (errors[blankId]) return <p className="mt-1 text-sm text-red-700" role="status">{errors[blankId]} Потеряйте фокус или нажмите Enter, чтобы повторить.</p>
+    if (state.status === 'correct') return <p className="mt-1 text-sm text-green-700" aria-live="polite">✓ Верно</p>
+    if (state.status === 'exhausted') return <p className="mt-1 text-sm text-red-700" aria-live="polite">Ответ: {state.revealed_answers?.join(', ')}</p>
+    if (state.last_check === 'incorrect') return <p className="mt-1 text-sm text-red-700" aria-live="polite">Неверно. Осталось попыток: {3 - state.attempts_used}</p>
+    return null
+  }
+  return <div className="space-y-6 max-sm:space-y-5">{exercise.content.items.map((item, itemIndex) => <div key={item.id} className="text-[20px] leading-[1.65] text-gray-900 max-sm:text-[18px] max-sm:leading-[1.6]"><div><span className="mr-1 font-semibold tabular-nums">{itemIndex + 1}.</span>{item.parts.map((part, index) => part.kind === 'text' ? <span key={index}>{part.text}</span> : (() => { const state = progress.blanks[part.id], closed = state.status !== 'open', inputValue = drafts[part.id] ?? state.value ?? '', hintId = `hint-${part.id}`; return <span className="inline-block align-baseline" key={part.id}><span className="inline-flex max-w-full items-center gap-2 whitespace-nowrap"><input aria-label={`Ответ для задания ${itemIndex + 1}`} aria-describedby={part.hint ? hintId : undefined} className={`h-11 w-[clamp(9rem,30vw,17.5rem)] max-w-full rounded-lg border px-3 text-base shadow-sm outline-none transition focus:border-indigo-600 focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:bg-gray-100 ${answerClass(state)}`} value={closed ? (state.value ?? '') : inputValue} disabled={closed || pending.has(part.id)} onChange={event => setDrafts(current => ({ ...current, [part.id]: event.target.value }))} onBlur={() => void submit(part.id)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } }} placeholder="Ответ" />{part.hint && <span id={hintId} className="text-base leading-6 text-gray-500">({part.hint})</span>}</span>{status(state, part.id)}</span> })())}</div></div>)}</div>
+}
+
+const renderers = { form_table: FormTable, single_input: SingleInput, self_check: SelfCheck, fill_blanks: FillBlanks } as const
+
+export function ExerciseRenderer({ exercise, onAction }: RendererProps) {
+  const Renderer = renderers[exercise.type_code] as (props: RendererProps) => JSX.Element
+  return <Renderer key={exercise.session_id} exercise={exercise} onAction={onAction} />
 }

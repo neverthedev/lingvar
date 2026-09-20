@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import re
 
 from fastapi.testclient import TestClient
 from sqlalchemy import text
@@ -225,93 +226,144 @@ def test_legacy_exercise_endpoints_keep_their_original_flat_payloads_via_shared_
         }]
 
 
-def test_fill_blanks_server_session_isolated_expires_and_counts_each_blank_independently(test_engine, test_database_url):
-    """A server session keeps a private snapshot, per-blank attempts, and lazily purges TTL rows."""
+def test_public_sessions_restore_all_types_and_keep_a_fixed_ttl(test_engine, test_database_url):
+    """All four mechanisms use private, replay-safe snapshots with a fixed lifetime."""
     upgrade_schema(test_database_url)
-    from main import app
+    with test_engine.begin() as connection:
+        noun_id = connection.execute(text(
+            "INSERT INTO nouns (word, cases_pojed, cases_mnoga, cases_menska) VALUES "
+            "('kot-session-qa', CAST(:singular AS jsonb), '{}'::jsonb, '{}'::jsonb) RETURNING id"
+        ), {"singular": '{"mianownik":"kot-session-qa","dopełniacz":"kota-session-qa"}'}).scalar_one()
+        numerator_id = connection.execute(text(
+            "INSERT INTO numerators (word, translation) VALUES ('jeden-session-qa', 'one-session-qa') RETURNING id"
+        )).scalar_one()
 
+    from main import app
     with TestClient(app) as client:
         admin = _admin_headers(client, test_database_url)
-        created = client.post("/admin/exercises", headers=admin, json=_exercise_payload("fill_blanks", _fill_definition(), slug="qa-session", status="published"))
-        assert created.status_code == 201, created.text
+        definitions = {
+            "form": ("form_table", {"source_code": "nouns_singular_cases", "sample_size": 1, "max_attempts": 3, "columns": [{"key": "dopełniacz", "label": "Dopełniacz"}]}),
+            "single": ("single_input", {"source_code": "numerators_translation_to_word", "sample_size": 1, "max_attempts": 3, "reveal_after_exhaustion": True}),
+            "self": ("self_check", {"source_code": "nouns_singular_genitive", "sample_size": 1}),
+            "fill": ("fill_blanks", _fill_definition()),
+        }
+        exercise_ids = {}
+        for name, (type_code, definition) in definitions.items():
+            response = client.post("/admin/exercises", headers=admin, json=_exercise_payload(type_code, definition, slug=f"qa-session-{name}", status="published"))
+            assert response.status_code == 201, response.text
+            exercise_ids[name] = response.json()["id"]
+
         student = _student_headers(client)
         other_student = _student_headers(client, "other-exercise-student-qa")
+        sessions = {}
+        for name in definitions:
+            response = client.post(f"/api/exercises/qa-session-{name}/sessions", headers=student)
+            assert response.status_code == 201, response.text
+            snapshot = response.json()
+            assert re.fullmatch(r"[A-Za-z0-9_-]{22}", snapshot["session_id"])
+            assert "accepted_answers" not in str(snapshot)
+            sessions[name] = snapshot
 
-        first = client.post("/api/exercises/qa-session/sessions", headers=student)
-        second = client.post("/api/exercises/qa-session/sessions", headers=student)
-        assert first.status_code == second.status_code == 201
-        first_id = first.json()["session_id"]
-        second_id = second.json()["session_id"]
-        assert first_id != second_id
-        assert all("accepted_answers" not in str(state) for state in first.json()["blanks"])
+        form_id = sessions["form"]["session_id"]
         with test_engine.connect() as connection:
-            created_at, expires_at, state_snapshot = connection.execute(
-                text("SELECT created_at, expires_at, state FROM exercise_sessions WHERE id = CAST(:id AS uuid)"),
-                {"id": first_id},
-            ).one()
-        assert timedelta(hours=23, minutes=59, seconds=59) <= expires_at - created_at <= timedelta(hours=24, seconds=1)
-        assert state_snapshot["blanks"]["blank-cat"]["accepted_answers"] == ["kota"]
-        assert client.post(f"/api/exercise-sessions/{first_id}/blanks/blank-cat/check", headers=other_student, json={"answer": "kota"}).status_code == 404
-        assert client.post(f"/api/exercise-sessions/{first_id}/blanks/missing/check", headers=student, json={"answer": "x"}).status_code == 404
+            internal_id, created_at, expires_at, state = connection.execute(text(
+                "SELECT id, created_at, expires_at, state FROM exercise_sessions WHERE public_id = :id"
+            ), {"id": form_id}).one()
+        assert str(internal_id) != form_id
+        assert expires_at - created_at == timedelta(hours=24)
+        assert state["answers"][str(noun_id)]["dopełniacz"] == "kota-session-qa"
 
-        stale_for_rejected_check = client.post("/api/exercises/qa-session/sessions", headers=student).json()["session_id"]
-        with test_engine.begin() as connection:
-            connection.execute(text("UPDATE exercise_sessions SET expires_at = :expired WHERE id = CAST(:id AS uuid)"), {
-                "expired": datetime.now(timezone.utc) - timedelta(seconds=1), "id": stale_for_rejected_check,
-            })
-        empty = client.post(f"/api/exercise-sessions/{first_id}/blanks/blank-cat/check", headers=student, json={"answer": "  "})
-        assert empty.status_code == 422
+        for name, snapshot in sessions.items():
+            recovered = client.get(f"/api/exercises/qa-session-{name}/sessions/{snapshot['session_id']}", headers=student)
+            assert recovered.status_code == 200, recovered.text
+            assert recovered.json()["session_id"] == snapshot["session_id"]
+            assert recovered.json()["expires_at"] == snapshot["expires_at"]
+            assert recovered.json()["content"] == snapshot["content"]
+            assert client.get(f"/api/exercises/qa-session-{name}/sessions/{snapshot['session_id']}", headers=other_student).status_code == 404
+
+        form_weight = client.post(f"/api/exercises/qa-session-form/sessions/{form_id}/actions", headers=student, json={"action": "form_table_weight", "row_id": noun_id, "direction": "up"})
+        assert form_weight.status_code == 200, form_weight.text
+        assert form_weight.json()["revision"] == 2
+        assert form_weight.json()["progress"]["rows"][str(noun_id)]["weight"] == 1
+
+        form_action = {"action": "form_table_check", "row_id": noun_id, "column_key": "dopełniacz", "answer": "kota-session-qa", "expected_attempts_used": 0}
+        form_checked = client.post(f"/api/exercises/qa-session-form/sessions/{form_id}/actions", headers=student, json=form_action)
+        assert form_checked.status_code == 200, form_checked.text
+        assert form_checked.json()["revision"] == 3
+        assert form_checked.json()["progress"]["cells"][f"{noun_id}:dopełniacz"]["status"] == "correct"
+        form_replayed = client.post(f"/api/exercises/qa-session-form/sessions/{form_id}/actions", headers=student, json=form_action)
+        assert form_replayed.status_code == 200
+        assert form_replayed.json()["revision"] == 3
         with test_engine.connect() as connection:
-            assert connection.execute(text("SELECT count(*) FROM exercise_sessions WHERE id = CAST(:id AS uuid)"), {
-                "id": stale_for_rejected_check,
-            }).scalar_one() == 0
+            stat = connection.execute(text(
+                "SELECT attempts, correct, weight, last_correct FROM word_test_stats WHERE word_type = 'noun' AND word_id = :id"
+            ), {"id": noun_id}).one()
+        assert stat == (1, 1, 1, True)
 
-        wrong_one = client.post(f"/api/exercise-sessions/{first_id}/blanks/blank-cat/check", headers=student, json={"answer": "kota!"})
-        assert wrong_one.status_code == 200, wrong_one.text
-        cat_after_one = next(state for state in wrong_one.json()["blanks"] if state["id"] == "blank-cat")
-        dog_after_one = next(state for state in wrong_one.json()["blanks"] if state["id"] == "blank-dog")
-        assert cat_after_one == {"id": "blank-cat", "value": "kota!", "attempts_used": 1, "status": "open", "last_check": "incorrect"}
-        assert dog_after_one["attempts_used"] == 0
+        single_id = sessions["single"]["session_id"]
+        single_action = {"action": "single_input_check", "item_id": numerator_id, "answer": "not-one", "expected_attempts_used": 0}
+        single_checked = client.post(f"/api/exercises/qa-session-single/sessions/{single_id}/actions", headers=student, json=single_action)
+        assert single_checked.status_code == 200
+        assert single_checked.json()["progress"]["items"][str(numerator_id)]["attempts_used"] == 1
+        assert client.post(f"/api/exercises/qa-session-single/sessions/{single_id}/actions", headers=student, json=single_action).json()["revision"] == 2
 
+        self_id = sessions["self"]["session_id"]
+        assert client.post(f"/api/exercises/qa-session-self/sessions/{self_id}/actions", headers=student, json={"action": "self_check_reveal", "item_id": noun_id}).json()["revision"] == 2
+        marked = client.post(f"/api/exercises/qa-session-self/sessions/{self_id}/actions", headers=student, json={"action": "self_check_mark", "item_id": noun_id, "result": "correct"})
+        assert marked.status_code == 200
+        assert marked.json()["progress"]["items"][str(noun_id)] == {"revealed": True, "result": "correct", "answer": "kota-session-qa"}
+
+        fill_id = sessions["fill"]["session_id"]
         changed_definition = _fill_definition()
-        changed_definition["items"][0]["parts"][1]["accepted_answers"] = ["zmieniona-forma"]
-        changed = _exercise_payload("fill_blanks", changed_definition, slug="ignored", status="published")
-        changed.pop("slug"); changed.pop("type_code"); changed.pop("schema_version")
-        assert client.put(f"/admin/exercises/{created.json()['id']}", headers=admin, json=changed).status_code == 200
+        changed_definition["items"][0]["parts"][1]["accepted_answers"] = ["changed-answer"]
+        replacement = _exercise_payload("fill_blanks", changed_definition, slug="ignored", status="published")
+        for key in ("slug", "type_code", "schema_version"):
+            replacement.pop(key)
+        assert client.put(f"/admin/exercises/{exercise_ids['fill']}", headers=admin, json=replacement).status_code == 200
+        fill_checked = client.post(f"/api/exercises/qa-session-fill/sessions/{fill_id}/actions", headers=student, json={"action": "fill_blank_check", "blank_id": "blank-cat", "answer": "KOTA", "expected_attempts_used": 0})
+        assert fill_checked.status_code == 200
+        assert fill_checked.json()["progress"]["blanks"]["blank-cat"] == {"value": "KOTA", "attempts_used": 1, "status": "correct", "last_check": "correct"}
+        assert client.post(f"/api/exercises/qa-session-fill/sessions/{fill_id}/actions", headers=student, json={"action": "self_check_reveal", "item_id": noun_id}).status_code == 409
 
-        # The started run keeps its original answer snapshot despite the admin edit.
-        original_snapshot_answer = client.post(f"/api/exercise-sessions/{first_id}/blanks/blank-cat/check", headers=student, json={"answer": "  KOTA  "})
-        assert next(state for state in original_snapshot_answer.json()["blanks"] if state["id"] == "blank-cat")["status"] == "correct"
-        # Internal whitespace and diacritics remain significant; only outer whitespace and case fold.
-        phrase_wrong = client.post(f"/api/exercise-sessions/{first_id}/blanks/blank-phrase/check", headers=student, json={"answer": "biały  kot"})
-        assert next(state for state in phrase_wrong.json()["blanks"] if state["id"] == "blank-phrase")["status"] == "open"
-        phrase_correct = client.post(f"/api/exercise-sessions/{first_id}/blanks/blank-phrase/check", headers=student, json={"answer": " BIAŁY KOT "})
-        assert next(state for state in phrase_correct.json()["blanks"] if state["id"] == "blank-phrase")["status"] == "correct"
-        turtle_wrong = client.post(f"/api/exercise-sessions/{first_id}/blanks/blank-turtle/check", headers=student, json={"answer": "zolw"})
-        assert next(state for state in turtle_wrong.json()["blanks"] if state["id"] == "blank-turtle")["status"] == "open"
-        turtle_correct = client.post(f"/api/exercise-sessions/{first_id}/blanks/blank-turtle/check", headers=student, json={"answer": "ŻÓŁW"})
-        assert next(state for state in turtle_correct.json()["blanks"] if state["id"] == "blank-turtle")["status"] == "correct"
-
-        client.post(f"/api/exercise-sessions/{first_id}/blanks/blank-dog/check", headers=student, json={"answer": "wrong"})
-        client.post(f"/api/exercise-sessions/{first_id}/blanks/blank-dog/check", headers=student, json={"answer": "wrong again"})
-        exhausted = client.post(f"/api/exercise-sessions/{first_id}/blanks/blank-dog/check", headers=student, json={"answer": "wrong third"})
-        assert exhausted.status_code == 200, exhausted.text
-        dog_exhausted = next(state for state in exhausted.json()["blanks"] if state["id"] == "blank-dog")
-        assert dog_exhausted["status"] == "exhausted"
-        assert dog_exhausted["attempts_used"] == 3
-        assert dog_exhausted["revealed_answers"] == ["psa", "pieska"]
-        assert client.post(f"/api/exercise-sessions/{first_id}/blanks/blank-dog/check", headers=student, json={"answer": "psa"}).status_code == 409
-
-        with test_engine.begin() as connection:
-            connection.execute(text("UPDATE exercise_sessions SET expires_at = :expired WHERE id = CAST(:id AS uuid)"), {"expired": datetime.now(timezone.utc) - timedelta(seconds=1), "id": second_id})
-        assert client.post(f"/api/exercise-sessions/{second_id}/blanks/blank-cat/check", headers=student, json={"answer": "kota"}).status_code == 410
         with test_engine.connect() as connection:
-            assert connection.execute(text("SELECT count(*) FROM exercise_sessions WHERE id = CAST(:id AS uuid)"), {"id": second_id}).scalar_one() == 0
+            after_actions = dict(connection.execute(text(
+                "SELECT public_id, expires_at FROM exercise_sessions WHERE public_id = ANY(:ids)"
+            ), {"ids": [snapshot["session_id"] for snapshot in sessions.values()]}).all())
+        assert after_actions == {snapshot["session_id"]: datetime.fromisoformat(snapshot["expires_at"]) for snapshot in sessions.values()}
+        for bad_id in ("not-a-valid-session", sessions["fill"]["session_id"]):
+            assert client.get(f"/api/exercises/qa-session-form/sessions/{bad_id}", headers=student).status_code == 404
 
-        stale = client.post("/api/exercises/qa-session/sessions", headers=student).json()["session_id"]
+        ttl_id = client.post("/api/exercises/qa-session-fill/sessions", headers=student).json()["session_id"]
+        just_before = datetime.now(timezone.utc) - timedelta(hours=24) + timedelta(seconds=5)
         with test_engine.begin() as connection:
-            connection.execute(text("UPDATE exercise_sessions SET expires_at = :expired WHERE id = CAST(:id AS uuid)"), {"expired": datetime.now(timezone.utc) - timedelta(seconds=1), "id": stale})
-        fresh = client.post("/api/exercises/qa-session/sessions", headers=student)
-        assert fresh.status_code == 201, fresh.text
+            connection.execute(text("UPDATE exercise_sessions SET created_at = :created, expires_at = :created + INTERVAL '24 hours' WHERE public_id = :id"), {"created": just_before, "id": ttl_id})
+        assert client.get(f"/api/exercises/qa-session-fill/sessions/{ttl_id}", headers=student).status_code == 200
+        expired = datetime.now(timezone.utc) - timedelta(hours=24, seconds=5)
+        with test_engine.begin() as connection:
+            connection.execute(text("UPDATE exercise_sessions SET created_at = :created, expires_at = :created + INTERVAL '24 hours' WHERE public_id = :id"), {"created": expired, "id": ttl_id})
+        assert client.get(f"/api/exercises/qa-session-fill/sessions/{ttl_id}", headers=student).status_code == 404
         with test_engine.connect() as connection:
-            assert connection.execute(text("SELECT count(*) FROM exercise_sessions WHERE id = CAST(:id AS uuid)"), {"id": stale}).scalar_one() == 0
+            assert connection.execute(text("SELECT count(*) FROM exercise_sessions WHERE public_id = :id"), {"id": ttl_id}).scalar_one() == 0
+
+
+def test_restart_replaces_the_session_without_leaking_progress(test_engine, test_database_url):
+    """Restart drops an accessible attempt and creates a clean replacement."""
+    upgrade_schema(test_database_url)
+    from main import app
+    with TestClient(app) as client:
+        admin = _admin_headers(client, test_database_url)
+        created = client.post("/admin/exercises", headers=admin, json=_exercise_payload("fill_blanks", _fill_definition(), slug="qa-restart", status="published"))
+        assert created.status_code == 201
+        student = _student_headers(client)
+        original = client.post("/api/exercises/qa-restart/sessions", headers=student).json()
+        original_id = original["session_id"]
+        assert client.post(f"/api/exercises/qa-restart/sessions/{original_id}/actions", headers=student, json={"action": "fill_blank_check", "blank_id": "blank-cat", "answer": "wrong", "expected_attempts_used": 0}).status_code == 200
+        fresh = client.post(f"/api/exercises/qa-restart/sessions/{original_id}/restart", headers=student)
+        assert fresh.status_code == 200, fresh.text
+        replacement = fresh.json()
+        assert replacement["session_id"] != original_id
+        assert replacement["revision"] == 1
+        assert replacement["progress"]["blanks"]["blank-cat"] == {"value": None, "attempts_used": 0, "status": "open", "last_check": None}
+        assert client.get(f"/api/exercises/qa-restart/sessions/{original_id}", headers=student).status_code == 404
+        with test_engine.connect() as connection:
+            assert connection.execute(text("SELECT count(*) FROM exercise_sessions WHERE public_id = :id"), {"id": original_id}).scalar_one() == 0
