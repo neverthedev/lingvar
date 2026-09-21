@@ -1,6 +1,8 @@
-import React from 'react'
+'use client'
+
+import React, { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Button, Typography } from '../atoms'
+import { Button, Icon } from '../atoms'
 
 export interface UserMenuProps {
   user?: {
@@ -18,6 +20,32 @@ export const UserMenu: React.FC<UserMenuProps> = ({
   onLogout,
   className = ''
 }) => {
+  const [isOpen, setIsOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!isOpen) return
+
+    const closeOutside = (event: MouseEvent | FocusEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) setIsOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setIsOpen(false)
+      triggerRef.current?.focus()
+    }
+
+    document.addEventListener('mousedown', closeOutside)
+    document.addEventListener('focusin', closeOutside)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('mousedown', closeOutside)
+      document.removeEventListener('focusin', closeOutside)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [isOpen])
+
   if (!isAuthenticated) {
     return (
       <div className={`flex items-center space-x-4 ${className}`}>
@@ -40,17 +68,31 @@ export const UserMenu: React.FC<UserMenuProps> = ({
   }
 
   return (
-    <div className={`flex items-center space-x-4 ${className}`}>
-      <Typography variant="small" color="secondary">
-        Welcome, {user?.username}!
-      </Typography>
-      <Button
-        onClick={onLogout}
-        variant="primary"
-        size="sm"
+    <div ref={containerRef} className={`relative flex items-center ${className}`}>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen(current => !current)}
+        className="inline-flex min-h-10 max-w-[15rem] items-center gap-2 rounded-lg px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
       >
-        Logout
-      </Button>
+        <Icon name="user" size="md" aria-hidden="true" className="shrink-0" />
+        <span className="truncate">{user?.username}</span>
+        <Icon name="triangle-down" size="sm" aria-hidden="true" className={`shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+      {isOpen && (
+        <div role="menu" className="absolute right-0 top-full z-50 mt-2 min-w-40 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { setIsOpen(false); onLogout() }}
+            className="flex min-h-10 w-full items-center rounded-md px-3 text-left text-sm font-medium text-gray-700 hover:bg-gray-50 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+          >
+            Выйти
+          </button>
+        </div>
+      )}
     </div>
   )
 }

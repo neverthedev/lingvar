@@ -22,6 +22,7 @@ export default function ExercisesPage() {
   const fetchExercises = async () => {
     try {
       setExercisesLoading(true)
+      setError(null)
 
       setExercises(await ApiService.getExercises())
     } catch (err) {
@@ -49,8 +50,8 @@ export default function ExercisesPage() {
   if (error) {
     return (
       <PageLayout>
-        <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
-          <div className="text-center">
+        <div className="mx-auto max-w-[1440px] px-4 py-12 sm:px-6">
+          <div>
             <Typography variant="h2" color="danger" className="mb-4">
               Error Loading Exercises
             </Typography>
@@ -71,18 +72,18 @@ export default function ExercisesPage() {
 
   return (
     <PageLayout>
-      <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-12">
-          <Typography variant="h1" weight="extrabold" align="center" className="mb-4">
-            Interactive Exercises
+      <div className="mx-auto max-w-[1440px] px-4 py-12 sm:px-6">
+        <div className="mb-8 max-w-2xl">
+          <Typography variant="h1" weight="extrabold" className="mb-3">
+            Упражнения
           </Typography>
-          <Typography variant="body" color="secondary" align="center" className="max-w-2xl mx-auto">
-            Practice your skills with our collection of interactive exercises. Test your knowledge and track your progress.
+          <Typography variant="body" color="secondary">
+            Выберите тему и начните практиковаться в польском языке.
           </Typography>
         </div>
 
         {exercises.length > 0 ? (
-          <ExerciseGrid exercises={exercises.map(exercise => ({ id: exercise.slug, title: exercise.title, description: exercise.description, difficulty: `${exercise.difficulty[0].toUpperCase()}${exercise.difficulty.slice(1)}` as 'Beginner' | 'Intermediate' | 'Advanced', duration: exercise.estimated_duration_minutes ? `${exercise.estimated_duration_minutes} min` : undefined }))} className="max-w-4xl mx-auto" />
+          <ExerciseGrid exercises={exercises} />
         ) : (
           <div className="text-center">
             <Typography variant="h3" className="mb-4">
@@ -94,16 +95,6 @@ export default function ExercisesPage() {
           </div>
         )}
 
-        {/* Coming Soon Section */}
-        <div className="mt-16 text-center">
-          <Typography variant="h2" weight="bold" align="center" className="mb-4">
-            More Exercises Coming Soon
-          </Typography>
-          <Typography variant="body" color="secondary" align="center" className="max-w-2xl mx-auto">
-            We're constantly adding new exercises to help you practice and improve your language skills.
-            Check back regularly for updates on new exercises and practice sessions.
-          </Typography>
-        </div>
       </div>
     </PageLayout>
   )

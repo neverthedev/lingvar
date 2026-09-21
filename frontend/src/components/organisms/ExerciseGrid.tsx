@@ -1,14 +1,9 @@
 import React from 'react'
 import { ExerciseCard } from '../molecules'
+import { ExerciseCatalogItem } from '@/lib/api'
 
 export interface ExerciseGridProps {
-  exercises: Array<{
-    id: string
-    title: string
-    description: string
-    difficulty?: 'Beginner' | 'Intermediate' | 'Advanced'
-    duration?: string
-  }>
+  exercises: ExerciseCatalogItem[]
   className?: string
 }
 
@@ -17,15 +12,14 @@ export const ExerciseGrid: React.FC<ExerciseGridProps> = ({
   className = ''
 }) => {
   return (
-    <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 ${className}`}>
+    <div className={`grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-6 ${className}`}>
       {exercises.map((exercise) => (
         <ExerciseCard
-          key={exercise.id}
+          key={exercise.slug}
+          slug={exercise.slug}
           title={exercise.title}
           description={exercise.description}
-          href={`/exercises/${exercise.id}`}
           difficulty={exercise.difficulty}
-          duration={exercise.duration}
         />
       ))}
     </div>

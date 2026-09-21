@@ -59,6 +59,30 @@ function SelfCheck({ exercise, onAction }: TypeRendererProps<'self_check'>) {
   return <div className="space-y-4">{error && <p className="text-sm text-red-700" role="alert">{error}</p>}<div className="rounded bg-gray-100 p-3 text-sm">Верно: {correct} · Неверно: {incorrect} · Осталось: {values.length - correct - incorrect}</div>{exercise.content.items.map(item => { const state = progress.items[String(item.id)]; return <div key={item.id} className={`rounded border p-4 ${state.result === 'correct' ? 'border-green-300 bg-green-50' : state.result === 'incorrect' ? 'border-red-300 bg-red-50' : ''}`}><p className="font-medium">{item.prompt}</p>{!state.revealed ? <Button size="sm" className="mt-2" disabled={pending === `reveal-${item.id}`} onClick={() => void act(`reveal-${item.id}`, { action: 'self_check_reveal', item_id: item.id })}>Показать ответ</Button> : <><p className="mt-2">{state.answer}</p>{state.result === null ? <div className="mt-2 flex gap-2"><Button size="sm" disabled={pending === `mark-${item.id}`} onClick={() => void act(`mark-${item.id}`, { action: 'self_check_mark', item_id: item.id, result: 'correct' })}>Верно</Button><Button size="sm" variant="secondary" disabled={pending === `mark-${item.id}`} onClick={() => void act(`mark-${item.id}`, { action: 'self_check_mark', item_id: item.id, result: 'incorrect' })}>Неверно</Button></div> : <p className={state.result === 'correct' ? 'mt-2 text-green-700' : 'mt-2 text-red-700'}>{state.result === 'correct' ? 'Отмечено: верно' : 'Отмечено: неверно'}</p>}</>}</div>})}</div>
 }
 
+type AttemptDotState = 'gray' | 'red' | 'green'
+
+function attemptDotStates(state: AnswerState): AttemptDotState[] {
+  return Array.from({ length: 3 }, (_, index) => {
+    if (state.status === 'correct' && index === state.attempts_used - 1) return 'green'
+    if (index < state.attempts_used) return 'red'
+    return 'gray'
+  })
+}
+
+function AttemptDots({ blankId, state }: { blankId: string; state: AnswerState }) {
+  const colors: Record<AttemptDotState, string> = {
+    gray: 'bg-gray-300',
+    red: 'bg-red-500',
+    green: 'bg-green-500',
+  }
+
+  return <span data-blank-id={blankId} className="flex shrink-0 flex-col gap-1" aria-hidden="true">
+    {attemptDotStates(state).map((dotState, index) => (
+      <span key={index} data-attempt-state={dotState} className={`h-2 w-2 rounded-full ${colors[dotState]}`} />
+    ))}
+  </span>
+}
+
 function FillBlanks({ exercise, onAction }: TypeRendererProps<'fill_blanks'>) {
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [pending, setPending] = useState<Set<string>>(() => new Set())
@@ -74,15 +98,55 @@ function FillBlanks({ exercise, onAction }: TypeRendererProps<'fill_blanks'>) {
     catch (reason) { setErrors(current => ({ ...current, [blankId]: reason instanceof Error ? reason.message : 'Проверка не выполнена.' })) }
     finally { pendingRef.current.delete(blankId); setPending(current => { const next = new Set(current); next.delete(blankId); return next }) }
   }
-  const status = (state: AnswerState, blankId: string) => {
-    if (pending.has(blankId)) return <p className="mt-1 text-sm text-gray-600" role="status">◌ Проверяем…</p>
-    if (errors[blankId]) return <p className="mt-1 text-sm text-red-700" role="status">{errors[blankId]} Потеряйте фокус или нажмите Enter, чтобы повторить.</p>
-    if (state.status === 'correct') return <p className="mt-1 text-sm text-green-700" aria-live="polite">✓ Верно</p>
-    if (state.status === 'exhausted') return <p className="mt-1 text-sm text-red-700" aria-live="polite">Ответ: {state.revealed_answers?.join(', ')}</p>
-    if (state.last_check === 'incorrect') return <p className="mt-1 text-sm text-red-700" aria-live="polite">Неверно. Осталось попыток: {3 - state.attempts_used}</p>
-    return null
+  const statusText = (state: AnswerState, blankId: string) => {
+    if (pending.has(blankId)) return 'Проверяем…'
+    if (errors[blankId]) return 'Не удалось проверить ответ. Повторите выход из поля или Enter.'
+    if (state.status === 'correct') return `Верно · ${state.attempts_used} из 3`
+    if (state.status === 'exhausted') return `Попытки закончились. Ответ: ${state.revealed_answers?.join(', ')}`
+    if (state.last_check === 'incorrect') return `Пока не совпало. Осталось попыток: ${3 - state.attempts_used} из 3`
+    return ''
   }
-  return <div className="space-y-6 max-sm:space-y-5">{exercise.content.items.map((item, itemIndex) => <div key={item.id} className="text-[20px] leading-[1.65] text-gray-900 max-sm:text-[18px] max-sm:leading-[1.6]"><div><span className="mr-1 font-semibold tabular-nums">{itemIndex + 1}.</span>{item.parts.map((part, index) => part.kind === 'text' ? <span key={index}>{part.text}</span> : (() => { const state = progress.blanks[part.id], closed = state.status !== 'open', inputValue = drafts[part.id] ?? state.value ?? '', hintId = `hint-${part.id}`; return <span className="inline-block align-baseline" key={part.id}><span className="inline-flex max-w-full items-center gap-2 whitespace-nowrap"><input aria-label={`Ответ для задания ${itemIndex + 1}`} aria-describedby={part.hint ? hintId : undefined} className={`h-11 w-[clamp(9rem,30vw,17.5rem)] max-w-full rounded-lg border px-3 text-base shadow-sm outline-none transition focus:border-indigo-600 focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:bg-gray-100 ${answerClass(state)}`} value={closed ? (state.value ?? '') : inputValue} disabled={closed || pending.has(part.id)} onChange={event => setDrafts(current => ({ ...current, [part.id]: event.target.value }))} onBlur={() => void submit(part.id)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } }} placeholder="Ответ" />{part.hint && <span id={hintId} className="text-base leading-6 text-gray-500">({part.hint})</span>}</span>{status(state, part.id)}</span> })())}</div></div>)}</div>
+  return <div className="space-y-6 max-sm:space-y-5">
+    {exercise.content.items.map((item, itemIndex) => (
+      <div key={item.id} className="text-[18px] leading-[1.6] text-slate-700 sm:text-[20px] sm:leading-[1.65]">
+        {item.parts.map((part, index) => {
+          if (part.kind === 'text') return <span key={index}>{part.text}</span>
+
+          const state = progress.blanks[part.id]
+          const closed = state.status !== 'open'
+          const inputValue = drafts[part.id] ?? state.value ?? ''
+          const displayedValue = state.status === 'exhausted'
+            ? (state.revealed_answers?.[0] ?? state.value ?? '')
+            : (closed ? (state.value ?? '') : inputValue)
+          const hintId = `hint-${part.id}`
+          const statusId = `status-${part.id}`
+          const describedBy = [part.hint ? hintId : null, statusId].filter(Boolean).join(' ')
+          const stateClass = state.status === 'correct'
+            ? 'border-green-400 bg-green-50 text-green-900 disabled:border-green-400 disabled:bg-green-50 disabled:text-green-900'
+            : state.status === 'exhausted'
+              ? 'border-red-400 bg-red-50 text-red-900 disabled:border-red-400 disabled:bg-red-50 disabled:text-red-900'
+              : 'border-gray-300 bg-white disabled:bg-gray-100'
+
+          return <span className="inline-flex max-w-full items-center gap-2 whitespace-nowrap align-middle" key={part.id}>
+            <input
+              aria-label={`Ответ для задания ${itemIndex + 1}`}
+              aria-describedby={describedBy}
+              className={`h-11 w-[clamp(9rem,18vw,17.5rem)] max-w-full rounded-lg border px-3 text-base leading-normal shadow-sm outline-none transition focus:border-indigo-600 focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed ${stateClass}`}
+              value={displayedValue}
+              disabled={closed || pending.has(part.id)}
+              onChange={event => setDrafts(current => ({ ...current, [part.id]: event.target.value }))}
+              onBlur={() => void submit(part.id)}
+              onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } }}
+              placeholder="Твой ответ..."
+            />
+            <AttemptDots blankId={part.id} state={state} />
+            {part.hint && <span id={hintId} className="text-base italic leading-6 text-slate-500">({part.hint})</span>}
+            <span id={statusId} className="sr-only" aria-live="polite">{statusText(state, part.id)}</span>
+          </span>
+        })}
+      </div>
+    ))}
+  </div>
 }
 
 const renderers = { form_table: FormTable, single_input: SingleInput, self_check: SelfCheck, fill_blanks: FillBlanks } as const
