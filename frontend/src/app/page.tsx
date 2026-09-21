@@ -113,13 +113,7 @@ export default function Home() {
               </Typography>
             ) : exercises.length > 0 ? (
               <ExerciseGrid
-                exercises={exercises.map((exercise) => ({
-                  id: exercise.slug,
-                  title: exercise.title,
-                  description: exercise.description,
-                  difficulty: `${exercise.difficulty[0].toUpperCase()}${exercise.difficulty.slice(1)}` as 'Beginner' | 'Intermediate' | 'Advanced',
-                  duration: exercise.estimated_duration_minutes ? `${exercise.estimated_duration_minutes} min` : undefined,
-                }))}
+                exercises={exercises}
                 className="max-w-4xl mx-auto"
               />
             ) : (

@@ -29,17 +29,41 @@ function createAdmin(username: string, email: string, password: string): Promise
   })
 }
 
+async function createCatalogExercises(username: string, password: string) {
+  const api = await request.newContext({ baseURL: backendUrl })
+  const login = await api.post('/users/token', { form: { username, password } })
+  expect(login.status()).toBe(200)
+  const headers = { Authorization: `Bearer ${(await login.json()).access_token}` }
+  for (const [slug, title] of [
+    ['browser-catalog-one-qa', 'Первое упражнение каталога'],
+    ['browser-catalog-two-qa', 'Второе упражнение каталога'],
+  ]) {
+    const created = await api.post('/admin/exercises', {
+      headers,
+      data: {
+        slug, type_code: 'fill_blanks', schema_version: 1, title, description: 'Синтетическое упражнение для проверки каталога', instruction: 'Заполните пропуск',
+        difficulty: 'beginner', estimated_duration_minutes: 5, display_order: 90, status: 'published',
+        definition: { items: [{ id: 'sentence-1', parts: [{ kind: 'text', text: 'Mam ' }, { kind: 'blank', id: 'answer', hint: 'kot', accepted_answers: ['kota'] }] }] },
+      },
+    })
+    expect(created.status()).toBe(201)
+  }
+  await api.dispose()
+}
+
 async function signIn(page: Page, username: string, password: string) {
   await page.goto('/login')
   await page.locator('#username').fill(username)
   await page.locator('#password').fill(password)
   await page.getByRole('button', { name: 'Sign in' }).click()
+    await expect(page).not.toHaveURL(/\/login$/)
 }
 
 test('administrator sees only metadata and learner retains learning routes', async ({ browser }) => {
   const adminUsername = 'browser-admin-qa'
   const adminPassword = 'safe-admin-password-8'
   await createAdmin(adminUsername, 'browser-admin-qa@example.com', adminPassword)
+  await createCatalogExercises(adminUsername, adminPassword)
 
   const adminContext = await browser.newContext()
   const adminPage = await adminContext.newPage()
@@ -91,7 +115,41 @@ test('administrator sees only metadata and learner retains learning routes', asy
   await expect(learnerPage.locator('main li')).toHaveCount(0)
   await learnerPage.goto('/exercises')
   await expect(learnerPage).toHaveURL(/\/exercises$/)
-  await expect(learnerPage.getByText('Interactive Exercises', { exact: true })).toBeVisible()
+  await expect(learnerPage.getByRole('main').getByText('Упражнения', { exact: true })).toBeVisible()
+  const exerciseCards = learnerPage.locator('main a[href^="/exercises/"]')
+  expect(await exerciseCards.count()).toBeGreaterThan(0)
+  const exerciseGrid = exerciseCards.first().locator('xpath=..')
+  expect(await exerciseGrid.locator(':scope > a').count()).toBe(await exerciseCards.count())
+  expect((await exerciseGrid.evaluate(grid => getComputedStyle(grid).gridTemplateColumns.split(' ').length))).toBe(2)
+  await expect(exerciseCards.first().locator('a')).toHaveCount(0)
+  const firstExerciseHref = await exerciseCards.first().getAttribute('href')
+  expect(firstExerciseHref).toMatch(/^\/exercises\/[^/]+$/)
+  await exerciseCards.first().click()
+  await expect(learnerPage).toHaveURL(new RegExp(`${firstExerciseHref!.replace('/', '\\/')}\\?session_id=`))
+
+  await learnerPage.goto('/exercises')
+  const userMenu = learnerPage.getByRole('button', { name: learnerUsername })
+  await expect(userMenu).toHaveAttribute('aria-expanded', 'false')
+  await expect(learnerPage.getByRole('button', { name: /logout/i })).toHaveCount(0)
+  await userMenu.click()
+  await expect(userMenu).toHaveAttribute('aria-expanded', 'true')
+  await expect(learnerPage.getByRole('menu')).toBeVisible()
+  await learnerPage.getByRole('menuitem', { name: 'Выйти' }).click()
+  await expect(learnerPage).toHaveURL(/\/login$/)
+
+  await signIn(learnerPage, learnerUsername, learnerPassword)
+  await learnerPage.goto('/exercises')
+  await userMenu.focus()
+  await userMenu.press('Space')
+  await expect(userMenu).toHaveAttribute('aria-expanded', 'true')
+  await userMenu.press('Escape')
+  await expect(userMenu).toHaveAttribute('aria-expanded', 'false')
+  await expect(userMenu).toBeFocused()
+
+  await learnerPage.setViewportSize({ width: 375, height: 700 })
+  await expect(learnerPage.getByRole('main').getByText('Упражнения', { exact: true })).toBeVisible()
+  expect((await exerciseGrid.evaluate(grid => getComputedStyle(grid).gridTemplateColumns.split(' ').length))).toBe(1)
+  expect(await learnerPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   for (const [legacyPath, canonicalPath, title] of [
     ['/exercises/numerators', '/exercises/numerators', 'Liczebniki (Numerals)'],
     ['/exercises/dopelniacz-pojed', '/exercises/dopelniacz-pojed', 'Dopełniacz (Genitive Case) Liczby Pojedynczej'],

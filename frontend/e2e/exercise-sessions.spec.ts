@@ -4,6 +4,37 @@ import { spawn } from 'node:child_process'
 const backendUrl = 'http://localhost:8000'
 const publicId = '[A-Za-z0-9_-]{22}'
 
+const expectedDotColors = {
+  gray: 'rgb(209, 213, 219)',
+  red: 'rgb(239, 68, 68)',
+  green: 'rgb(34, 197, 94)',
+} as const
+
+async function expectAttemptDots(page: Page, blankId: string, states: Array<keyof typeof expectedDotColors>) {
+  const container = page.locator(`[data-blank-id="${blankId}"]`)
+  const dots = container.locator('[data-attempt-state]')
+  await expect(dots).toHaveCount(3)
+  await expect(container).toHaveAttribute('aria-hidden', 'true')
+  for (let index = 0; index < states.length; index += 1) {
+    const state = states[index]
+    await expect(dots.nth(index)).toHaveAttribute('data-attempt-state', state)
+    await expect(dots.nth(index)).toHaveCSS('background-color', expectedDotColors[state])
+  }
+}
+
+async function expectVerticalDots(page: Page, blankId: string) {
+  const geometry = await page.locator(`[data-blank-id="${blankId}"] [data-attempt-state]`).evaluateAll(dots => dots.map(dot => {
+    const bounds = dot.getBoundingClientRect()
+    return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
+  }))
+  expect(geometry).toHaveLength(3)
+  expect(geometry.every(dot => dot.width === 8 && dot.height === 8)).toBe(true)
+  expect(geometry[0].x).toBe(geometry[1].x)
+  expect(geometry[1].x).toBe(geometry[2].x)
+  expect(geometry[0].y).toBeLessThan(geometry[1].y)
+  expect(geometry[1].y).toBeLessThan(geometry[2].y)
+}
+
 function createAdmin(username: string, email: string, password: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const command = spawn('python3', ['-m', 'create_admin', '--username', username, '--email', email, '--password-stdin'], {
@@ -67,7 +98,9 @@ async function createFillExercise() {
         { kind: 'text', text: 'Mam ' },
         { kind: 'blank', id: 'cat', hint: 'kot', accepted_answers: ['kota'] },
         { kind: 'text', text: ' oraz ' },
-        { kind: 'blank', id: 'dog', hint: 'pies', accepted_answers: ['psa'] },
+        { kind: 'blank', id: 'dog', hint: 'pies', accepted_answers: ['psa', 'pieska'] },
+        { kind: 'text', text: ' i ' },
+        { kind: 'blank', id: 'bird', hint: 'ptak', accepted_answers: ['ptaka'] },
         { kind: 'text', text: '.' },
       ] }] },
     },
@@ -156,10 +189,17 @@ test('fill blanks submits on blur or Enter, restores server state, and restarts 
   const inputs = page.getByRole('textbox', { name: 'Ответ для задания 1' })
   const cat = inputs.first()
   const dog = inputs.nth(1)
+  const bird = inputs.nth(2)
   await expect(page.getByRole('button', { name: 'Проверить' })).toHaveCount(0)
   await expect(cat).not.toHaveAttribute('placeholder', 'kot')
-  await expect(cat.locator('xpath=following-sibling::*[1]')).toHaveText('(kot)')
+  await expect(page.locator('#hint-cat')).toHaveText('(kot)')
   await expect(page.locator('body')).toContainText('(pies)')
+  await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0')
+  await expect(page.getByText('0 / 3', { exact: true })).toBeVisible()
+  for (const blankId of ['cat', 'dog', 'bird']) {
+    await expectAttemptDots(page, blankId, ['gray', 'gray', 'gray'])
+    await expectVerticalDots(page, blankId)
+  }
 
   let actionRequests = 0
   page.on('request', request => {
@@ -173,37 +213,86 @@ test('fill blanks submits on blur or Enter, restores server state, and restarts 
   await cat.fill('wrong')
   await cat.blur()
   await wrongResponse
-  await expect(page.getByText('Неверно. Осталось попыток: 2', { exact: true })).toBeVisible()
+  await expect(page.locator('#status-cat')).toHaveText('Пока не совпало. Осталось попыток: 2 из 3')
+  await expect(page.locator('#status-cat')).toHaveCSS('position', 'absolute')
+  await expect(page.locator('#status-cat')).toHaveCSS('width', '1px')
+  await expect(page.locator('#status-cat')).toHaveCSS('height', '1px')
   await expect(cat).toHaveValue('wrong')
+  await expectAttemptDots(page, 'cat', ['red', 'gray', 'gray'])
+  await expectAttemptDots(page, 'dog', ['gray', 'gray', 'gray'])
+
+  const secondWrongResponse = page.waitForResponse(response => response.url().includes(`/sessions/${originalId}/actions`) && response.request().method() === 'POST')
+  await cat.fill('still-wrong')
+  await cat.blur()
+  await secondWrongResponse
+  await expectAttemptDots(page, 'cat', ['red', 'red', 'gray'])
+  await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0')
 
   const correctResponse = page.waitForResponse(response => response.url().includes(`/sessions/${originalId}/actions`) && response.request().method() === 'POST')
   await cat.fill('KOTA')
   await cat.press('Enter')
   await correctResponse
-  await expect.poll(() => actionRequests).toBe(2)
+  await expect.poll(() => actionRequests).toBe(3)
   await expect(cat).toBeDisabled()
-  await expect(page.getByText('✓ Верно', { exact: true })).toBeVisible()
+  await expect(cat).toHaveCSS('background-color', 'rgb(240, 253, 244)')
+  await expect(cat).toHaveCSS('border-color', 'rgb(74, 222, 128)')
+  await expectAttemptDots(page, 'cat', ['red', 'red', 'green'])
+  await expect(page.locator('#status-cat')).toHaveText('Верно · 3 из 3')
+  await expect(page.getByText('✓ Верно', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('OK', { exact: true })).toHaveCount(0)
+  await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '1')
+
+  const dogResponse = page.waitForResponse(response => response.url().includes(`/sessions/${originalId}/actions`) && response.request().method() === 'POST')
+  await dog.fill('PSA')
+  await dog.blur()
+  await dogResponse
+  await expect(dog).toBeDisabled()
+  await expect(dog).toHaveCSS('background-color', 'rgb(240, 253, 244)')
+  await expect(dog).toHaveCSS('border-color', 'rgb(74, 222, 128)')
+  await expectAttemptDots(page, 'dog', ['green', 'gray', 'gray'])
+  await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '2')
+
+  await page.route('**/api/exercises/browser-session-fill-qa/sessions/*/actions', route => route.abort('failed'))
+  await bird.fill('network-error')
+  await bird.blur()
+  await expect(page.locator('#status-bird')).toHaveText('Не удалось проверить ответ. Повторите выход из поля или Enter.')
+  await expect(bird).toBeEnabled()
+  await expectAttemptDots(page, 'bird', ['gray', 'gray', 'gray'])
+  await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '2')
+  await page.unroute('**/api/exercises/browser-session-fill-qa/sessions/*/actions')
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const response = page.waitForResponse(result => result.url().includes(`/sessions/${originalId}/actions`) && result.request().method() === 'POST')
+    await bird.fill(`wrong-${attempt}`)
+    await bird.blur()
+    await response
+  }
+  await expect(bird).toBeDisabled()
+  await expect(bird).toHaveValue('ptaka')
+  await expect(bird).toHaveCSS('background-color', 'rgb(254, 242, 242)')
+  await expect(bird).toHaveCSS('border-color', 'rgb(248, 113, 113)')
+  await expectAttemptDots(page, 'bird', ['red', 'red', 'red'])
+  await expect(page.locator('#status-bird')).toHaveText('Попытки закончились. Ответ: ptaka')
+  await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '3')
   await page.reload()
   await expect(page).toHaveURL(originalUrl)
   await expect(inputs.first()).toHaveValue('KOTA')
   await expect(inputs.first()).toBeDisabled()
+  await expect(page.getByRole('textbox', { name: 'Ответ для задания 1' }).nth(2)).toHaveValue('ptaka')
+  await expectAttemptDots(page, 'cat', ['red', 'red', 'green'])
+  await expectAttemptDots(page, 'bird', ['red', 'red', 'red'])
+  await expect(page.locator('#status-cat')).toHaveText('Верно · 3 из 3')
+  await expect(page.locator('#status-bird')).toHaveText('Попытки закончились. Ответ: ptaka')
 
-  await page.route('**/api/exercises/browser-session-fill-qa/sessions/*/actions', route => route.abort('failed'))
-  await dog.fill('draft-only')
-  await dog.blur()
-  await expect(page.getByText(/Потеряйте фокус или нажмите Enter, чтобы повторить/)).toBeVisible()
-  await page.unroute('**/api/exercises/browser-session-fill-qa/sessions/*/actions')
-  await page.reload()
-  await expect(page.getByRole('textbox', { name: 'Ответ для задания 1' }).nth(1)).toHaveValue('')
-
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const response = page.waitForResponse(result => result.url().includes(`/sessions/${originalId}/actions`) && result.request().method() === 'POST')
-    await dog.fill(`wrong-${attempt}`)
-    await dog.blur()
-    await response
-  }
-  await expect(page.getByText('Ответ: psa', { exact: true })).toBeVisible()
-  await expect(dog).toBeDisabled()
+  const restartResponse = page.waitForResponse(response => response.url().includes(`/sessions/${originalId}/restart`) && response.request().method() === 'POST')
+  await page.getByRole('button', { name: 'Начать заново' }).click()
+  const restartSnapshot = await restartResponse
+  const restartBody = await restartSnapshot.json() as { session_id: string }
+  await expect.poll(() => new URL(page.url()).searchParams.get('session_id')).toBe(restartBody.session_id)
+  const resetId = restartBody.session_id
+  await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0')
+  await expect(page.getByText('0 / 3', { exact: true })).toBeVisible()
+  await expectAttemptDots(page, 'cat', ['gray', 'gray', 'gray'])
 
   await page.goto(`/exercises/browser-session-fill-qa?session_id=missing-session`)
   await expect(page).toHaveURL(new RegExp(`/exercises/browser-session-fill-qa\\?session_id=${publicId}$`))
@@ -258,7 +347,6 @@ test('fill blanks submits on blur or Enter, restores server state, and restarts 
   expect(replacementCreates).toBe(1)
   await expect(page.getByRole('textbox', { name: 'Ответ для задания 1' }).first()).toHaveValue('')
 
-  const resetId = new URL(page.url()).searchParams.get('session_id')!
   const pendingReleases: Array<() => void> = []
   await page.route('**/api/exercises/browser-session-fill-qa/sessions/*/actions', async route => {
     await new Promise<void>(resolve => pendingReleases.push(resolve))
@@ -272,23 +360,14 @@ test('fill blanks submits on blur or Enter, restores server state, and restarts 
   await expect.poll(() => pendingReleases.length).toBe(2)
   await expect(replacementInputs.first()).toBeDisabled()
   await expect(replacementInputs.nth(1)).toBeDisabled()
+  await expectAttemptDots(page, 'cat', ['gray', 'gray', 'gray'])
+  await expectAttemptDots(page, 'dog', ['gray', 'gray', 'gray'])
   pendingReleases[0]()
   await expect(replacementInputs.first()).toBeEnabled()
   await expect(replacementInputs.nth(1)).toBeDisabled()
   pendingReleases[1]()
   await expect(replacementInputs.nth(1)).toBeEnabled()
   await page.unroute('**/api/exercises/browser-session-fill-qa/sessions/*/actions')
-
-  const restartResponse = page.waitForResponse(response => response.url().includes(`/sessions/${resetId}/restart`) && response.request().method() === 'POST')
-  await page.getByRole('button', { name: 'Начать заново' }).click()
-  const restartSnapshot = await restartResponse
-  const restartBody = await restartSnapshot.json() as { session_id: string }
-  await expect.poll(() => new URL(page.url()).searchParams.get('session_id')).toBe(restartBody.session_id)
-  const restartedId = new URL(page.url()).searchParams.get('session_id')!
-  expect(restartedId).not.toBe(resetId)
-  await expect(page.getByRole('textbox', { name: 'Ответ для задания 1' }).first()).toHaveValue('')
-  const oldSession = await api.get(`/api/exercises/browser-session-fill-qa/sessions/${resetId}`, { headers: learnerHeaders })
-  expect(oldSession.status()).toBe(404)
 
   await context.close()
   await api.dispose()

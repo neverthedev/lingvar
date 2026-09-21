@@ -3,59 +3,58 @@ import Link from 'next/link'
 import { Icon, Typography } from '../atoms'
 
 export interface ExerciseCardProps {
+  slug: string
   title: string
   description: string
-  href: string
-  api?: string
-  icon?: 'document' | 'book'
-  difficulty?: 'Beginner' | 'Intermediate' | 'Advanced'
-  duration?: string
+  difficulty: 'beginner' | 'intermediate' | 'advanced'
   className?: string
 }
 
+const variants = [
+  { icon: 'book' as const, background: 'bg-emerald-50', foreground: 'text-emerald-600' },
+  { icon: 'document' as const, background: 'bg-rose-50', foreground: 'text-rose-600' },
+  { icon: 'user' as const, background: 'bg-blue-50', foreground: 'text-blue-600' },
+  { icon: 'book' as const, background: 'bg-indigo-50', foreground: 'text-indigo-600' },
+]
+
+const variantFor = (slug: string) => {
+  const hash = Array.from(slug).reduce((value, character) => ((value * 31) + character.charCodeAt(0)) >>> 0, 0)
+  return variants[hash % variants.length]
+}
+
 export const ExerciseCard: React.FC<ExerciseCardProps> = ({
+  slug,
   title,
   description,
-  href,
-  icon = 'document',
-  difficulty = 'Beginner',
-  duration,
+  difficulty,
   className = ''
 }) => {
+  const variant = variantFor(slug)
+
   return (
-    <Link href={href}>
-      <div className={`bg-white rounded-lg shadow-md hover:shadow-xl transition-shadow p-6 border border-gray-200 hover:border-green-200 cursor-pointer ${className}`}>
-        <div className="flex items-center mb-4">
-          <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mr-4">
-            <Icon name={icon} size="lg" className="text-green-600" />
-          </div>
-          <div className="flex-1">
-            <Typography variant="h5" weight="semibold" className="mb-2">
-              {title}
-            </Typography>
-          </div>
-        </div>
-
-        <Typography variant="body" color="secondary" className="mb-4">
-          {description}
+    <Link
+      href={`/exercises/${slug}`}
+      className={`grid min-h-[132px] grid-cols-[76px_minmax(0,1fr)] items-center gap-4 rounded-xl border border-gray-200 bg-white p-6 transition-colors hover:border-indigo-400 hover:bg-indigo-50/20 focus:outline-none focus-visible:border-indigo-500 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 sm:grid-cols-[76px_minmax(0,1fr)_auto] ${className}`}
+    >
+      <span className={`flex h-[76px] w-[76px] items-center justify-center rounded-lg ${variant.background}`} aria-hidden="true">
+        <Icon name={variant.icon} size="lg" className={variant.foreground} />
+      </span>
+      <span className="min-w-0 self-center">
+        <Typography variant="h5" weight="semibold" className="text-gray-950">
+          {title}
         </Typography>
-
-        <div className="flex items-center justify-between text-sm text-gray-500">
-          <div className="flex items-center space-x-4">
-            <span className="flex items-center">
-              <Icon name="user" size="sm" className="mr-1" />
-              {difficulty}
-            </span>
-            {duration && (
-              <span className="flex items-center">
-                <Icon name="book" size="sm" className="mr-1" />
-                {duration}
-              </span>
-            )}
-          </div>
-          <Icon name="arrow-right" size="sm" />
-        </div>
-      </div>
+        {description && (
+          <Typography variant="body" color="secondary" className="mt-1 leading-6">
+            {description}
+          </Typography>
+        )}
+      </span>
+      <span className="col-start-2 flex min-h-10 shrink-0 items-center gap-3 justify-self-end self-center pl-1 text-gray-500 sm:col-start-3">
+        <span className="rounded-lg bg-gray-100 px-2.5 py-1 text-xs font-medium capitalize text-gray-700">
+          {difficulty}
+        </span>
+        <Icon name="arrow-right" size="md" aria-hidden="true" />
+      </span>
     </Link>
   )
 }
