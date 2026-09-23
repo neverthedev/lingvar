@@ -88,12 +88,15 @@ async function createFillExercise() {
   const login = await api.post('/users/token', { form: { username: adminUsername, password: adminPassword } })
   expect(login.status()).toBe(200)
   const headers = { Authorization: `Bearer ${(await login.json()).access_token}` }
+  const rules = await api.get('/admin/rules', { headers })
+  expect(rules.status()).toBe(200)
+  const ruleId = (await rules.json() as Array<{ id: number }>)[0].id
   const created = await api.post('/admin/exercises', {
     headers,
     data: {
       slug: 'browser-session-fill-qa', type_code: 'fill_blanks', schema_version: 1,
       title: 'Browser session fill blanks', description: 'Session browser coverage', instruction: 'Заполните пропуски',
-      difficulty: 'beginner', estimated_duration_minutes: 5, display_order: 90, status: 'published',
+      difficulty: 'beginner', estimated_duration_minutes: 5, display_order: 90, status: 'published', rule_id: ruleId,
       definition: { items: [{ id: 'sentence-1', parts: [
         { kind: 'text', text: 'Mam ' },
         { kind: 'blank', id: 'cat', hint: 'kot', accepted_answers: ['kota'] },
@@ -111,7 +114,7 @@ async function createFillExercise() {
     data: {
       slug: 'browser-session-fill-other-qa', type_code: 'fill_blanks', schema_version: 1,
       title: 'Other browser session exercise', description: 'Used to reject a session from another exercise', instruction: 'Заполните пропуск',
-      difficulty: 'beginner', estimated_duration_minutes: 5, display_order: 91, status: 'published',
+      difficulty: 'beginner', estimated_duration_minutes: 5, display_order: 91, status: 'published', rule_id: ruleId,
       definition: { items: [{ id: 'other-sentence', parts: [{ kind: 'text', text: 'Mam ' }, { kind: 'blank', id: 'other', hint: 'kot', accepted_answers: ['kota'] }] }] },
     },
   })
@@ -368,6 +371,105 @@ test('fill blanks submits on blur or Enter, restores server state, and restarts 
   pendingReleases[1]()
   await expect(replacementInputs.nth(1)).toBeEnabled()
   await page.unroute('**/api/exercises/browser-session-fill-qa/sessions/*/actions')
+
+  await context.close()
+  await api.dispose()
+})
+
+test('catalog groups rules and a grouped blank input keeps partial progress independent', async ({ browser }) => {
+  test.setTimeout(60_000)
+  const adminUsername = 'browser-group-admin-qa'
+  const adminPassword = 'safe-browser-group-password-8'
+  await createAdmin(adminUsername, 'browser-group-admin-qa@example.com', adminPassword)
+  const api = await request.newContext({ baseURL: backendUrl })
+  const login = await api.post('/users/token', { form: { username: adminUsername, password: adminPassword } })
+  expect(login.status()).toBe(200)
+  const headers = { Authorization: `Bearer ${(await login.json()).access_token}` }
+  const root = await api.post('/admin/rules', { headers, data: {
+    title: 'Группа пропусков UI', description: 'Правило для browser-проверки', parent_rule_id: null,
+  } })
+  expect(root.status()).toBe(201)
+  const ruleId = (await root.json() as { id: number }).id
+  const created = await api.post('/admin/exercises', { headers, data: {
+    slug: 'browser-grouped-blanks-qa', type_code: 'fill_blanks', schema_version: 1,
+    title: 'Групповые пропуски', description: 'Проверка общего поля', instruction: 'Заполните пропуски',
+    difficulty: 'beginner', estimated_duration_minutes: 5, display_order: 1, status: 'published', rule_id: ruleId,
+    definition: { items: [{ id: 'sentence', parts: [
+      { kind: 'text', text: 'To ' },
+      { kind: 'blank', id: 'color', hint: null, accepted_answers: ['zielony'] },
+      { kind: 'blank', id: 'person', hint: null, accepted_answers: ['kolega Mateusz'] },
+      { kind: 'text', text: '.' },
+    ] }] },
+  } })
+  expect(created.status()).toBe(201)
+  const learnerUsername = 'browser-group-learner-qa'
+  const learnerPassword = 'safe-browser-group-password-8'
+  expect((await api.post('/users/register', { data: {
+    username: learnerUsername, email: 'browser-group-learner-qa@example.com', password: learnerPassword,
+  } })).status()).toBe(200)
+  const learnerLogin = await api.post('/users/token', { form: { username: learnerUsername, password: learnerPassword } })
+  expect(learnerLogin.status()).toBe(200)
+  const learnerHeaders = { Authorization: `Bearer ${(await learnerLogin.json()).access_token}` }
+
+  const context = await browser.newContext()
+  const page = await context.newPage()
+  await signIn(page, learnerUsername, learnerPassword)
+  await page.goto('/exercises')
+  await expect(page.getByRole('heading', { name: 'Группа пропусков UI', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Правила польского языка', exact: true })).toBeVisible()
+  await page.getByRole('link', { name: 'Групповые пропуски' }).click()
+  const groupedInputName = 'Ответ для задания 1, объединённые пропуски 1, 2'
+  const grouped = page.getByRole('textbox', { name: groupedInputName })
+  await expect(grouped).toHaveCount(1)
+  let groupActions = 0
+  page.on('request', request => {
+    if (request.method() === 'POST' && request.url().includes('/actions')) groupActions += 1
+  })
+  const firstResponse = page.waitForResponse(response => response.url().includes('/actions') && response.request().method() === 'POST')
+  await grouped.fill('zielony kolega')
+  await grouped.blur()
+  await firstResponse
+  await expectAttemptDots(page, 'color', ['green', 'gray', 'gray'])
+  await expectAttemptDots(page, 'person', ['red', 'gray', 'gray'])
+  await expect(grouped).toBeEnabled()
+  await grouped.focus()
+  await grouped.blur()
+  await expect.poll(() => groupActions).toBe(1)
+  await expectAttemptDots(page, 'color', ['green', 'gray', 'gray'])
+  await expectAttemptDots(page, 'person', ['red', 'gray', 'gray'])
+  const secondResponse = page.waitForResponse(response => response.url().includes('/actions') && response.request().method() === 'POST')
+  await grouped.fill('zielony kolega Mateusz')
+  await grouped.press('Enter')
+  await secondResponse
+  await expect.poll(() => groupActions).toBe(2)
+  await expectAttemptDots(page, 'color', ['green', 'gray', 'gray'])
+  await expectAttemptDots(page, 'person', ['red', 'green', 'gray'])
+  await expect(grouped).toBeDisabled()
+
+  const exhaust = async (answer: string) => {
+    const session = await api.post('/api/exercises/browser-grouped-blanks-qa/sessions', { headers: learnerHeaders })
+    expect(session.status()).toBe(201)
+    const sessionId = (await session.json() as { session_id: string }).session_id
+    await page.goto(`/exercises/browser-grouped-blanks-qa?session_id=${sessionId}`)
+    const input = page.getByRole('textbox', { name: groupedInputName })
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const response = page.waitForResponse(result => result.url().includes(`/sessions/${sessionId}/actions`) && result.request().method() === 'POST')
+      await input.fill(`${answer}${' '.repeat(attempt)}`)
+      await input.blur()
+      await response
+    }
+    return input
+  }
+  const oneExhausted = await exhaust('wrong kolega Mateusz')
+  await expect(oneExhausted).toBeDisabled()
+  await expect(oneExhausted).toHaveValue('zielony kolega Mateusz')
+  await expectAttemptDots(page, 'color', ['red', 'red', 'red'])
+  await expectAttemptDots(page, 'person', ['green', 'gray', 'gray'])
+  const allExhausted = await exhaust('wrong wrong')
+  await expect(allExhausted).toBeDisabled()
+  await expect(allExhausted).toHaveValue('zielony kolega Mateusz')
+  await expectAttemptDots(page, 'color', ['red', 'red', 'red'])
+  await expectAttemptDots(page, 'person', ['red', 'red', 'red'])
 
   await context.close()
   await api.dispose()

@@ -4,6 +4,7 @@ from .dopelniacz import router as dopelniacz_router
 from .numerators import router as numerators_router
 from .mianownik import router as mianownik_router
 from models.exercise import Exercise
+from models.vocabulary import Rule
 from models.user import User as DBUser
 from services.auth import get_current_student_user
 from services.database import get_db
@@ -15,7 +16,7 @@ from services.exercises import (
     get_session,
     restart_session,
 )
-from schemas.exercises import BlankCheckRequest, LearnerCatalogItem, LearnerExerciseResponse, SessionActionRequest
+from schemas.exercises import BlankCheckRequest, LearnerCatalogGroup, LearnerExerciseResponse, SessionActionRequest
 
 # Main exercises router
 router = APIRouter(
@@ -28,12 +29,37 @@ router.include_router(dopelniacz_router)
 router.include_router(numerators_router)
 router.include_router(mianownik_router)
 
-@router.get("/", tags=["exercises"], response_model=list[LearnerCatalogItem])
+@router.get("/", tags=["exercises"], response_model=list[LearnerCatalogGroup])
 async def exercises_root(
     current_user: DBUser = Depends(get_current_student_user), db: Session = Depends(get_db)
 ):
     exercises = db.query(Exercise).filter(Exercise.status == "published").order_by(Exercise.display_order, Exercise.id).all()
-    return [{"slug": item.slug, "title": item.title, "description": item.description, "difficulty": item.difficulty, "estimated_duration_minutes": item.estimated_duration_minutes, "type_code": item.type_code} for item in exercises]
+    rules = {rule.id: rule for rule in db.query(Rule).all()}
+
+    def root_for(rule_id: int) -> Rule:
+        rule = rules[rule_id]
+        visited = {rule.id}
+        while rule.parent_rule_id is not None and rule.parent_rule_id in rules and rule.parent_rule_id not in visited:
+            rule = rules[rule.parent_rule_id]
+            visited.add(rule.id)
+        return rule
+
+    groups: dict[int, dict] = {}
+    for item in exercises:
+        root = root_for(item.rule_id)
+        groups.setdefault(root.id, {"root_rule": {"id": root.id, "title": root.title}, "exercises": []})["exercises"].append({
+            "slug": item.slug, "title": item.title, "description": item.description,
+            "difficulty": item.difficulty, "estimated_duration_minutes": item.estimated_duration_minutes,
+            "type_code": item.type_code,
+        })
+    return sorted(
+        groups.values(),
+        key=lambda group: (
+            rules[group["root_rule"]["id"]].ordering is None,
+            rules[group["root_rule"]["id"]].ordering if rules[group["root_rule"]["id"]].ordering is not None else 0,
+            group["root_rule"]["title"], group["root_rule"]["id"],
+        ),
+    )
 
 
 @router.get("/{slug}/content", tags=["exercises"], response_model=LearnerExerciseResponse)

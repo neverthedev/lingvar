@@ -209,7 +209,7 @@ def test_administrator_is_limited_to_exercise_metadata_and_student_learning_flow
         assert admin_catalog.status_code == 200, admin_catalog.text
         assert admin_catalog.json()
         assert all(
-            set(item) == {"id", "slug", "title", "type_code", "schema_version", "status", "display_order"}
+            set(item) == {"id", "slug", "title", "type_code", "schema_version", "status", "display_order", "rule_id"}
             for item in admin_catalog.json()
         )
 
@@ -357,7 +357,7 @@ def test_administrator_manages_a_rule_forest_atomically(test_engine, test_databa
             json={"title": "   ", "description": " Description ", "parent_rule_id": None},
         )
         assert invalid.status_code == 422, invalid.text
-        assert client.get("/admin/rules", headers=admin_headers).json() == []
+        assert [rule["title"] for rule in client.get("/admin/rules", headers=admin_headers).json()] == ["Правила польского языка"]
 
         root_a = create_rule(client, admin_headers, " Root A ", " Description A ")
         assert root_a["title"] == "Root A"
@@ -372,9 +372,10 @@ def test_administrator_manages_a_rule_forest_atomically(test_engine, test_databa
 
         forest = client.get("/admin/rules", headers=admin_headers)
         assert forest.status_code == 200, forest.text
-        assert [node["title"] for node in forest.json()] == ["Root A", "Root B"]
-        assert [node["title"] for node in forest.json()[0]["children"]] == ["Middle", "Sibling", "Movable"]
-        assert forest.json()[0]["children"][0]["children"][0]["children"][0]["id"] == grandchild["id"]
+        assert [node["title"] for node in forest.json()] == ["Правила польского языка", "Root A", "Root B"]
+        root_a_node = next(node for node in forest.json() if node["id"] == root_a["id"])
+        assert [node["title"] for node in root_a_node["children"]] == ["Middle", "Sibling", "Movable"]
+        assert root_a_node["children"][0]["children"][0]["children"][0]["id"] == grandchild["id"]
 
         changed_sibling = client.put(
             f"/admin/rules/{sibling['id']}",

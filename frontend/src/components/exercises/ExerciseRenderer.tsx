@@ -89,6 +89,12 @@ function FillBlanks({ exercise, onAction }: TypeRendererProps<'fill_blanks'>) {
   const pendingRef = useRef<Set<string>>(new Set())
   const [errors, setErrors] = useState<Record<string, string>>({})
   const progress = exercise.progress as Extract<typeof exercise.progress, { blanks: Record<string, AnswerState> }>
+  const blankNumbers: Record<string, number> = {}
+  let nextBlankNumber = 1
+  exercise.content.items.forEach(item => item.parts.forEach(part => {
+    if (part.kind === 'blank') blankNumbers[part.id] = nextBlankNumber++
+    if (part.kind === 'blank_group') part.blanks.forEach(blank => { blankNumbers[blank.id] = nextBlankNumber++ })
+  }))
   const submit = async (blankId: string) => {
     const state = progress.blanks[blankId], answer = drafts[blankId] ?? state.value ?? ''
     if (!answer.trim() || state.status !== 'open' || pendingRef.current.has(blankId) || answer === (state.value ?? '')) return
@@ -97,6 +103,31 @@ function FillBlanks({ exercise, onAction }: TypeRendererProps<'fill_blanks'>) {
     try { await onAction({ action: 'fill_blank_check', blank_id: blankId, answer, expected_attempts_used: state.attempts_used }) }
     catch (reason) { setErrors(current => ({ ...current, [blankId]: reason instanceof Error ? reason.message : 'Проверка не выполнена.' })) }
     finally { pendingRef.current.delete(blankId); setPending(current => { const next = new Set(current); next.delete(blankId); return next }) }
+  }
+  const submitGroup = async (blankIds: string[]) => {
+    const key = `group:${blankIds.join('|')}`
+    const states = blankIds.map(blankId => progress.blanks[blankId])
+    const serverValue = states.map(state => state.status === 'exhausted'
+      ? (state.revealed_answers?.[0] ?? state.value ?? '')
+      : (state.value ?? '')).join(' ').trim()
+    const answer = drafts[key] ?? serverValue
+    if (!answer.trim() || answer === serverValue || states.every(state => state.status !== 'open') || blankIds.some(blankId => pendingRef.current.has(blankId))) return
+    blankIds.forEach(blankId => pendingRef.current.add(blankId))
+    setPending(current => new Set([...Array.from(current), ...blankIds]))
+    setErrors(current => { const next = { ...current }; blankIds.forEach(blankId => delete next[blankId]); return next })
+    try {
+      await onAction({
+        action: 'fill_blank_group_check', blank_ids: blankIds, answer,
+        expected_attempts_used: Object.fromEntries(blankIds.map(blankId => [blankId, progress.blanks[blankId].attempts_used])),
+      })
+      setDrafts(current => { const next = { ...current }; delete next[key]; return next })
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : 'Проверка не выполнена.'
+      setErrors(current => ({ ...current, ...Object.fromEntries(blankIds.map(blankId => [blankId, message])) }))
+    } finally {
+      blankIds.forEach(blankId => pendingRef.current.delete(blankId))
+      setPending(current => { const next = new Set(current); blankIds.forEach(blankId => next.delete(blankId)); return next })
+    }
   }
   const statusText = (state: AnswerState, blankId: string) => {
     if (pending.has(blankId)) return 'Проверяем…'
@@ -111,6 +142,35 @@ function FillBlanks({ exercise, onAction }: TypeRendererProps<'fill_blanks'>) {
       <div key={item.id} className="text-[18px] leading-[1.6] text-slate-700 sm:text-[20px] sm:leading-[1.65]">
         {item.parts.map((part, index) => {
           if (part.kind === 'text') return <span key={index}>{part.text}</span>
+
+          if (part.kind === 'blank_group') {
+            const blankIds = part.blanks.map(blank => blank.id)
+            const states = blankIds.map(blankId => progress.blanks[blankId])
+            const key = `group:${blankIds.join('|')}`
+            const closed = states.every(state => state.status !== 'open')
+            const inputValue = drafts[key] ?? states.map(state => state.status === 'exhausted' ? (state.revealed_answers?.[0] ?? state.value ?? '') : (state.value ?? '')).join(' ').trim()
+            const stateClass = states.every(state => state.status === 'correct')
+              ? 'border-green-400 bg-green-50 text-green-900 disabled:border-green-400 disabled:bg-green-50 disabled:text-green-900'
+              : states.some(state => state.status === 'exhausted') && closed
+                ? 'border-red-400 bg-red-50 text-red-900 disabled:border-red-400 disabled:bg-red-50 disabled:text-red-900'
+                : 'border-gray-300 bg-white disabled:bg-gray-100'
+            const statusIds = blankIds.map(blankId => `status-${blankId}`)
+            return <span className="inline-flex max-w-full flex-wrap items-center gap-2 align-middle" key={key}>
+              <input
+                aria-label={`Ответ для задания ${itemIndex + 1}, объединённые пропуски ${blankIds.map(blankId => blankNumbers[blankId]).join(', ')}`}
+                aria-describedby={statusIds.join(' ')}
+                className={`h-11 w-[clamp(9rem,18vw,17.5rem)] max-w-full rounded-lg border px-3 text-base leading-normal shadow-sm outline-none transition focus:border-indigo-600 focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed ${stateClass}`}
+                value={inputValue}
+                disabled={closed || blankIds.some(blankId => pending.has(blankId))}
+                onChange={event => setDrafts(current => ({ ...current, [key]: event.target.value }))}
+                onBlur={() => void submitGroup(blankIds)}
+                onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } }}
+                placeholder="Твой ответ..."
+              />
+              {blankIds.map(blankId => <AttemptDots blankId={blankId} state={progress.blanks[blankId]} key={blankId} />)}
+              {blankIds.map(blankId => <span id={`status-${blankId}`} className="sr-only" aria-live="polite" key={`status-${blankId}`}>{statusText(progress.blanks[blankId], blankId)}</span>)}
+            </span>
+          }
 
           const state = progress.blanks[part.id]
           const closed = state.status !== 'open'
