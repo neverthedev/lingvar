@@ -8,8 +8,10 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from models.exercise import Exercise
 from models.vocabulary import Rule
 from services.database import get_db
+from services.exercises import exercise_blank_rule_references, lock_rules_table, stored_rule_assignments_are_valid
 
 
 router = APIRouter(prefix="/rules", tags=["admin"])
@@ -84,10 +86,6 @@ def _build_forest(rules: list[Rule]) -> list[RuleNode]:
     return build(None)
 
 
-def _lock_rules_table(db: Session) -> None:
-    db.execute(text("LOCK TABLE rules IN SHARE ROW EXCLUSIVE MODE"))
-
-
 def _get_rule_or_404(db: Session, rule_id: int, message: str = "Rule was not found.") -> Rule:
     rule = db.query(Rule).filter(Rule.id == rule_id).one_or_none()
     if rule is None:
@@ -145,7 +143,7 @@ async def list_rules(db: Session = Depends(get_db)):
 @router.post("", response_model=RuleNode, status_code=status.HTTP_201_CREATED)
 async def create_rule(payload: RulePayload, db: Session = Depends(get_db)):
     try:
-        _lock_rules_table(db)
+        lock_rules_table(db)
         if payload.parent_rule_id is not None:
             _get_rule_or_404(db, payload.parent_rule_id, "Parent rule was not found.")
 
@@ -173,7 +171,7 @@ async def create_rule(payload: RulePayload, db: Session = Depends(get_db)):
 @router.put("/{rule_id}", response_model=RuleNode)
 async def update_rule(rule_id: int, payload: RulePayload, db: Session = Depends(get_db)):
     try:
-        _lock_rules_table(db)
+        lock_rules_table(db)
         rule = _get_rule_or_404(db, rule_id)
         _validate_parent(db, rule.id, payload.parent_rule_id)
 
@@ -183,6 +181,12 @@ async def update_rule(rule_id: int, payload: RulePayload, db: Session = Depends(
         if parent_changed:
             rule.parent_rule_id = payload.parent_rule_id
             rule.ordering = _next_ordering(db, payload.parent_rule_id, exclude_rule_id=rule.id)
+            db.flush()
+            if not stored_rule_assignments_are_valid(db):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Перенос нарушает связь правила упражнения с правилом пропуска.",
+                )
 
         db.commit()
         db.refresh(rule)
@@ -201,8 +205,19 @@ async def update_rule(rule_id: int, payload: RulePayload, db: Session = Depends(
 @router.delete("/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_rule(rule_id: int, db: Session = Depends(get_db)) -> Response:
     try:
-        _lock_rules_table(db)
+        lock_rules_table(db)
         rule = _get_rule_or_404(db, rule_id)
+        if db.query(Exercise.id).filter(Exercise.rule_id == rule.id).first() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Правило нельзя удалить: оно назначено упражнению.",
+            )
+        for exercise in db.query(Exercise).filter(Exercise.type_code == "fill_blanks").all():
+            if any(blank_rule_id == rule.id for blank_rule_id in exercise_blank_rule_references(exercise)):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Правило нельзя удалить: оно назначено пропуску упражнения.",
+                )
         new_parent_id = rule.parent_rule_id
         children = (
             db.query(Rule)

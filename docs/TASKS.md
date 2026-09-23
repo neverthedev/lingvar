@@ -10,4 +10,4 @@
 | TASK-006 | [Упражнения разных типов в админке](tasks/TASK-006.md) | `task-06-admin-exercise-types` | завершена |
 | TASK-007 | [Сохранение сессии и обновление интерфейса падежного упражнения](tasks/TASK-007.md) | `task-07-exercise-session-ui` | завершена |
 | TASK-008 | [Общий лейаут, каталог и упражнение с пропусками](tasks/TASK-008.md) | `task-08-exercise-layout` | завершена |
-| TASK-009 | [Связь упражнений с правилами](tasks/TASK-009.md) | `task-09-exercise-rule-mapping` | проектирование |
+| TASK-009 | [Связь упражнений с правилами](tasks/TASK-009.md) | `task-09-exercise-rule-mapping` | ожидает ревью PO |

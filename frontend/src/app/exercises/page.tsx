@@ -4,12 +4,12 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useRouter } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import { PageLayout, ExerciseGrid, Typography, LoadingSpinner } from '@/components'
-import { ApiService, ExerciseCatalogItem } from '@/lib/api'
+import { ApiService, ExerciseCatalogGroup } from '@/lib/api'
 
 export default function ExercisesPage() {
   const { isAuthenticated, isLoading } = useAuth()
   const router = useRouter()
-  const [exercises, setExercises] = useState<ExerciseCatalogItem[]>([])
+  const [exerciseGroups, setExerciseGroups] = useState<ExerciseCatalogGroup[]>([])
   const [exercisesLoading, setExercisesLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -24,7 +24,7 @@ export default function ExercisesPage() {
       setExercisesLoading(true)
       setError(null)
 
-      setExercises(await ApiService.getExercises())
+      setExerciseGroups(await ApiService.getExercises())
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {
@@ -82,8 +82,13 @@ export default function ExercisesPage() {
           </Typography>
         </div>
 
-        {exercises.length > 0 ? (
-          <ExerciseGrid exercises={exercises} />
+        {exerciseGroups.length > 0 ? (
+          <div className="space-y-10">
+            {exerciseGroups.map(group => <section key={group.root_rule.id} aria-labelledby={`rule-${group.root_rule.id}`}>
+              <h2 id={`rule-${group.root_rule.id}`} className="mb-4 text-2xl font-semibold text-gray-950">{group.root_rule.title}</h2>
+              <ExerciseGrid exercises={group.exercises} />
+            </section>)}
+          </div>
         ) : (
           <div className="text-center">
             <Typography variant="h3" className="mb-4">

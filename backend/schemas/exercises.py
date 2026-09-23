@@ -73,6 +73,7 @@ class BlankPart(StrictModel):
     kind: Literal["blank"]
     id: str = Field(min_length=1, max_length=100)
     hint: str | None = None
+    rule_id: int | None = None
     accepted_answers: list[str] = Field(min_length=1)
 
     @field_validator("id")
@@ -104,6 +105,9 @@ class BlankPart(StrictModel):
                 raise ValueError("Допустимые ответы не должны повторяться")
             seen.add(normalized)
             result.append(value)
+        word_counts = {len(value.split()) for value in result}
+        if len(word_counts) != 1:
+            raise ValueError("Все допустимые ответы должны содержать одинаковое число слов")
         return result
 
 
@@ -152,6 +156,7 @@ class ExerciseCreate(StrictModel):
     estimated_duration_minutes: int | None = Field(default=None, gt=0)
     display_order: int = Field(ge=0)
     status: Literal["draft", "published"]
+    rule_id: int
     definition: dict[str, Any]
 
     @field_validator("slug")
@@ -178,6 +183,7 @@ class ExerciseUpdate(StrictModel):
     estimated_duration_minutes: int | None = Field(default=None, gt=0)
     display_order: int = Field(ge=0)
     status: Literal["draft", "published"]
+    rule_id: int
     definition: dict[str, Any]
 
     @field_validator("title", "instruction")
@@ -232,6 +238,21 @@ class FillBlankCheckAction(StrictModel):
     expected_attempts_used: int = Field(ge=0)
 
 
+class FillBlankGroupCheckAction(StrictModel):
+    action: Literal["fill_blank_group_check"]
+    blank_ids: list[str] = Field(min_length=2)
+    answer: str
+    expected_attempts_used: dict[str, int]
+
+    @model_validator(mode="after")
+    def matching_expected_attempts(self):
+        if set(self.blank_ids) != set(self.expected_attempts_used):
+            raise ValueError("Для каждого пропуска должно быть указано ожидаемое число попыток")
+        if any(value < 0 for value in self.expected_attempts_used.values()):
+            raise ValueError("Число попыток не может быть отрицательным")
+        return self
+
+
 SessionActionRequest = Annotated[
     Union[
         FormTableCheckAction,
@@ -240,6 +261,7 @@ SessionActionRequest = Annotated[
         SelfCheckRevealAction,
         SelfCheckMarkAction,
         FillBlankCheckAction,
+        FillBlankGroupCheckAction,
     ],
     Field(discriminator="action"),
 ]
@@ -252,6 +274,16 @@ class LearnerCatalogItem(StrictModel):
     difficulty: Literal["beginner", "intermediate", "advanced"]
     estimated_duration_minutes: int | None
     type_code: Literal["form_table", "single_input", "self_check", "fill_blanks"]
+
+
+class LearnerCatalogRule(StrictModel):
+    id: int
+    title: str
+
+
+class LearnerCatalogGroup(StrictModel):
+    root_rule: LearnerCatalogRule
+    exercises: list[LearnerCatalogItem]
 
 
 class LearnerFormTableRow(StrictModel):
@@ -295,7 +327,17 @@ class LearnerBlankPart(StrictModel):
     hint: str | None
 
 
-LearnerFillBlanksPart = Annotated[Union[LearnerTextPart, LearnerBlankPart], Field(discriminator="kind")]
+class LearnerBlankGroupBlank(StrictModel):
+    id: str
+    word_count: int
+
+
+class LearnerBlankGroupPart(StrictModel):
+    kind: Literal["blank_group"]
+    blanks: list[LearnerBlankGroupBlank] = Field(min_length=2)
+
+
+LearnerFillBlanksPart = Annotated[Union[LearnerTextPart, LearnerBlankPart, LearnerBlankGroupPart], Field(discriminator="kind")]
 
 
 class LearnerFillBlanksItem(StrictModel):

@@ -17,7 +17,7 @@ from sqlalchemy.engine import make_url
 
 BACKEND_DIRECTORY = Path(__file__).resolve().parents[1]
 INITIAL_REVISION = "0001_initial_schema"
-HEAD_REVISION = "0003_exercise_session_public_id"
+HEAD_REVISION = "0004_exercise_rule_mapping"
 APPLICATION_TABLES = {
     "users",
     "nouns",
@@ -111,7 +111,7 @@ def test_initial_migration_lifecycle(test_engine, test_database_url):
 
     downgrade = _alembic_downgrade(test_database_url)
     assert downgrade.returncode != 0
-    assert "Downgrade of exercise session public identifiers is not supported" in (downgrade.stdout + downgrade.stderr)
+    assert "Downgrade of exercise rule assignments is not supported" in (downgrade.stdout + downgrade.stderr)
     assert _application_tables(test_engine) == APPLICATION_TABLES
     assert _migration_command("check", test_database_url).returncode == 0
 
@@ -146,8 +146,8 @@ def test_direct_stamp_is_forbidden(test_database_url):
     assert "Direct alembic stamp is disabled" in (result.stdout + result.stderr)
 
 
-def test_exercise_migration_upgrades_an_existing_exercise_schema(test_engine, test_database_url):
-    """Revision 0003 backfills existing sessions without changing their creation time."""
+def test_exercise_migration_upgrades_existing_exercises_and_sessions(test_engine, test_database_url):
+    """Revisions 0003 and 0004 preserve legacy data and give every exercise one rule."""
     environment = os.environ.copy()
     environment["DATABASE_URL"] = test_database_url
     initial = subprocess.run(
@@ -186,6 +186,9 @@ def test_exercise_migration_upgrades_an_existing_exercise_schema(test_engine, te
             "legacy_expires_at": created_at + timedelta(minutes=30),
         })
 
+    with test_engine.connect() as connection:
+        definitions_before = dict(connection.execute(text("SELECT slug, definition FROM exercises")).all())
+
     upgrade = _migration_command("upgrade", test_database_url)
     assert upgrade.returncode == 0, upgrade.stderr
     with test_engine.connect() as connection:
@@ -215,4 +218,18 @@ def test_exercise_migration_upgrades_an_existing_exercise_schema(test_engine, te
             ("mianowniki-mnoga", "single_input", "Mianownik Liczny Mnogej", "Practice Polish nouns in nominative plural case with their Russian translations. Learn different forms of plural nouns."),
         ]
         assert all(row["schema_version"] == 1 and row["status"] == "published" for row in catalog)
+        assigned_rule = connection.execute(text(
+            "SELECT id, title, description, parent_rule_id FROM rules WHERE title = 'Правила польского языка'"
+        )).mappings().one()
+        assert assigned_rule["parent_rule_id"] is None
+        assert "Общее правило" in assigned_rule["description"]
+        migrated_exercises = connection.execute(text(
+            "SELECT slug, rule_id, definition FROM exercises ORDER BY display_order, id"
+        )).mappings().all()
+        assert {row["rule_id"] for row in migrated_exercises} == {assigned_rule["id"]}
+        assert {row["slug"]: row["definition"] for row in migrated_exercises} == definitions_before
+        assert connection.execute(text(
+            "SELECT is_nullable FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = 'exercises' AND column_name = 'rule_id'"
+        )).scalar_one() == "NO"
         assert connection.execute(text("SELECT count(*) FROM nouns WHERE word = 'kot-migration-qa'")).scalar_one() == 1

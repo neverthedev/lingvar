@@ -19,7 +19,7 @@ export default function Home() {
       try {
         setExercisesLoading(true)
         setExercisesError(null)
-        setExercises(await ApiService.getExercises())
+        setExercises((await ApiService.getExercises()).flatMap(group => group.exercises))
       } catch (err) {
         setExercisesError(err instanceof Error ? err.message : 'Unable to load exercises')
       } finally {

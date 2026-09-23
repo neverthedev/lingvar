@@ -34,6 +34,9 @@ async function createCatalogExercises(username: string, password: string) {
   const login = await api.post('/users/token', { form: { username, password } })
   expect(login.status()).toBe(200)
   const headers = { Authorization: `Bearer ${(await login.json()).access_token}` }
+  const rules = await api.get('/admin/rules', { headers })
+  expect(rules.status()).toBe(200)
+  const ruleId = (await rules.json() as Array<{ id: number }>)[0].id
   for (const [slug, title] of [
     ['browser-catalog-one-qa', 'Первое упражнение каталога'],
     ['browser-catalog-two-qa', 'Второе упражнение каталога'],
@@ -42,7 +45,7 @@ async function createCatalogExercises(username: string, password: string) {
       headers,
       data: {
         slug, type_code: 'fill_blanks', schema_version: 1, title, description: 'Синтетическое упражнение для проверки каталога', instruction: 'Заполните пропуск',
-        difficulty: 'beginner', estimated_duration_minutes: 5, display_order: 90, status: 'published',
+        difficulty: 'beginner', estimated_duration_minutes: 5, display_order: 90, status: 'published', rule_id: ruleId,
         definition: { items: [{ id: 'sentence-1', parts: [{ kind: 'text', text: 'Mam ' }, { kind: 'blank', id: 'answer', hint: 'kot', accepted_answers: ['kota'] }] }] },
       },
     })
@@ -189,6 +192,51 @@ test('legacy lessons paths stay unavailable for anonymous and learner visitors',
   await learnerContext.close()
 })
 
+test('exercise editor requires a rule and limits blank rules to its selected branch', async ({ browser }) => {
+  const username = 'browser-exercise-rules-admin-qa'
+  const password = 'safe-exercise-rules-password-8'
+  await createAdmin(username, 'browser-exercise-rules-admin-qa@example.com', password)
+  const api = await request.newContext({ baseURL: backendUrl })
+  const login = await api.post('/users/token', { form: { username, password } })
+  expect(login.status()).toBe(200)
+  const headers = { Authorization: `Bearer ${(await login.json()).access_token}` }
+  const createRule = async (title: string, parent_rule_id: number | null = null) => {
+    const response = await api.post('/admin/rules', { headers, data: { title, description: `Описание ${title}`, parent_rule_id } })
+    expect(response.status()).toBe(201)
+    return await response.json() as { id: number }
+  }
+  const root = await createRule('Правило UI')
+  await createRule('Подправило UI', root.id)
+  await createRule('Другая ветвь UI')
+
+  const context = await browser.newContext()
+  const page = await context.newPage()
+  await signIn(page, username, password)
+  await page.goto('/admin/exercises/new')
+  const exerciseRule = page.locator('label').filter({ hasText: /^Правило упражнения/ }).locator('select')
+  await expect(exerciseRule).toHaveValue('')
+  let exerciseCreateRequests = 0
+  page.on('request', request => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/admin/exercises') exerciseCreateRequests += 1
+  })
+  await page.getByRole('button', { name: 'Сохранить' }).click()
+  await expect(page.locator('p').filter({ hasText: 'Выберите правило упражнения.' })).toBeVisible()
+  await expect.poll(() => exerciseCreateRequests).toBe(0)
+
+  await expect(exerciseRule.locator('option')).toContainText(['Правило UI', 'Правило UI → Подправило UI', 'Другая ветвь UI'])
+  await exerciseRule.selectOption({ label: 'Правило UI' })
+  const blankRule = page.locator('label').filter({ hasText: 'Правило пропуска (необязательно)' }).locator('select')
+  await expect(blankRule.locator('option')).toContainText(['Не задано', 'Правило UI', 'Правило UI → Подправило UI'])
+  await expect(blankRule.locator('option')).toHaveCount(3)
+  await blankRule.selectOption({ label: 'Правило UI → Подправило UI' })
+  await exerciseRule.selectOption({ label: 'Другая ветвь UI' })
+  await expect(blankRule).toHaveValue('')
+  await expect(page.getByRole('status')).toContainText('Недопустимые правила пропусков очищены')
+
+  await context.close()
+  await api.dispose()
+})
+
 test('administrator creates, edits, moves and deletes a hierarchical rule tree', async ({ browser }) => {
   const username = 'browser-rules-admin-qa'
   const password = 'safe-admin-password-8'
@@ -200,8 +248,7 @@ test('administrator creates, edits, moves and deletes a hierarchical rule tree',
   await expect(page).toHaveURL(/\/admin\/exercises$/)
   await page.goto('/admin/rules')
   await expect(page.getByRole('main').getByText('Правила', { exact: true })).toBeVisible()
-  await expect(page.getByText('Правил пока нет. Создайте первое правило верхнего уровня.')).toBeVisible()
-  await expect(page.getByText('Всего правил: 0', { exact: false })).toBeVisible()
+  await expect(page.getByText('Правила польского языка', { exact: true })).toBeVisible()
 
   await page.getByRole('link', { name: 'Создать правило' }).first().click()
   await page.locator('#rule-title').fill('Корневое правило')
@@ -284,13 +331,13 @@ test('administrator creates, edits, moves and deletes a hierarchical rule tree',
   await expect(tree.getByText('Третий уровень', { exact: true })).toBeVisible()
 
   await page.goto('/admin/rules')
-  await expect(page.getByText('Всего правил: 4', { exact: false })).toBeVisible()
+  await expect(page.getByText('Всего правил:', { exact: false })).toBeVisible()
   await expect(page.getByText('включая подправила', { exact: true })).toBeVisible()
   const rootCard = page.locator('li').filter({ hasText: 'Корневое правило' })
   await expect(rootCard.getByText('Описание корневого правила', { exact: true })).toBeVisible()
   page.once('dialog', (dialog) => dialog.accept())
   await rootCard.getByRole('button', { name: 'Удалить', exact: true }).click()
-  await expect(page.getByText('Всего правил: 3', { exact: false })).toBeVisible()
+  await expect(page.getByText('Всего правил:', { exact: false })).toBeVisible()
   await expect(page.getByText('Первый уровень', { exact: true })).toBeVisible()
   await expect(page.getByText('Третий уровень', { exact: true })).toBeVisible()
 

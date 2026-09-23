@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from models.exercise import Exercise, ExerciseSession
-from models.vocabulary import Noun, Numerator, Pronoun, Verb, WordTestStat
+from models.vocabulary import Noun, Numerator, Pronoun, Rule, Verb, WordTestStat
 from schemas.exercises import (
     BlankPart,
     FillBlanksDefinition,
@@ -174,16 +174,31 @@ def _serialize_vocabulary_source(db: Session, definition: dict[str, Any], user_i
 
 
 def _serialize_fill_blanks(_db: Session, definition: dict[str, Any], _user_id: int) -> dict[str, Any]:
+    def serialize_parts(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        index = 0
+        while index < len(parts):
+            part = parts[index]
+            if part["kind"] != "blank" or part.get("hint") is not None:
+                result.append({"kind": "blank", "id": part["id"], "hint": part.get("hint")} if part["kind"] == "blank" else part)
+                index += 1
+                continue
+            group: list[dict[str, Any]] = []
+            while index < len(parts) and parts[index]["kind"] == "blank" and parts[index].get("hint") is None:
+                blank = parts[index]
+                group.append({"id": blank["id"], "word_count": len(blank["accepted_answers"][0].split())})
+                index += 1
+            if len(group) == 1:
+                result.append({"kind": "blank", "id": group[0]["id"], "hint": None})
+            else:
+                result.append({"kind": "blank_group", "blanks": group})
+        return result
+
     return {
         "items": [
             {
                 "id": item["id"],
-                "parts": [
-                    {"kind": "blank", "id": part["id"], "hint": part.get("hint")}
-                    if part["kind"] == "blank"
-                    else part
-                    for part in item["parts"]
-                ],
+                "parts": serialize_parts(item["parts"]),
             }
             for item in definition["items"]
         ]
@@ -236,6 +251,72 @@ def validate_definition(type_code: str, schema_version: int, definition: dict[st
                     for index in invalid_columns
                 ])
     return parsed.model_dump(mode="json")
+
+
+def lock_rules_table(db: Session) -> None:
+    """Serialize administrative rule links and tree mutations in one transaction."""
+    db.execute(text("LOCK TABLE rules IN SHARE ROW EXCLUSIVE MODE"))
+
+
+def _subtree_ids(rules: list[Rule], root_id: int) -> set[int]:
+    children: dict[int | None, list[int]] = {}
+    for rule in rules:
+        children.setdefault(rule.parent_rule_id, []).append(rule.id)
+    result = {root_id}
+    pending = [root_id]
+    while pending:
+        current = pending.pop()
+        for child_id in children.get(current, []):
+            if child_id not in result:
+                result.add(child_id)
+                pending.append(child_id)
+    return result
+
+
+def validate_exercise_rule_assignment(
+    db: Session, rule_id: int, type_code: str, definition: dict[str, Any],
+) -> None:
+    """Validate the exercise rule and optional fill-blank rules against one tree snapshot."""
+    rules = db.query(Rule).all()
+    by_id = {rule.id: rule for rule in rules}
+    if rule_id not in by_id:
+        raise _validation_error(["rule_id"], "Выбранное правило не существует")
+    if type_code != "fill_blanks":
+        return
+    allowed_ids = _subtree_ids(rules, rule_id)
+    for item_index, item in enumerate(definition["items"]):
+        for part_index, part in enumerate(item["parts"]):
+            blank_rule_id = part.get("rule_id") if part["kind"] == "blank" else None
+            if blank_rule_id is None:
+                continue
+            location = ["definition", "items", item_index, "parts", part_index, "rule_id"]
+            if blank_rule_id not in by_id:
+                raise _validation_error(location, "Выбранное правило пропуска не существует")
+            if blank_rule_id not in allowed_ids:
+                raise _validation_error(location, "Правило пропуска должно быть правилом упражнения или его подправилом")
+
+
+def exercise_blank_rule_references(exercise: Exercise) -> list[int]:
+    if exercise.type_code != "fill_blanks":
+        return []
+    definition = FillBlanksDefinition.model_validate(exercise.definition)
+    return [
+        part.rule_id
+        for item in definition.items for part in item.parts
+        if isinstance(part, BlankPart) and part.rule_id is not None
+    ]
+
+
+def stored_rule_assignments_are_valid(db: Session) -> bool:
+    rules = db.query(Rule).all()
+    rule_ids = {rule.id for rule in rules}
+    for exercise in db.query(Exercise).all():
+        if exercise.rule_id not in rule_ids:
+            return False
+        allowed_ids = _subtree_ids(rules, exercise.rule_id)
+        if any(blank_rule_id not in allowed_ids for blank_rule_id in exercise_blank_rule_references(exercise)):
+            return False
+    return True
 
 
 def list_types() -> list[dict[str, Any]]:
@@ -451,8 +532,8 @@ def _require_open_check(entry: dict[str, Any], expected_attempts: int) -> bool:
     return True
 
 
-def _check_answer(entry: dict[str, Any], answer: str, accepted_answers: list[str] | str, max_attempts: int = 3) -> bool:
-    if not answer.strip():
+def _check_answer(entry: dict[str, Any], answer: str, accepted_answers: list[str] | str, max_attempts: int = 3, *, allow_empty: bool = False) -> bool:
+    if not answer.strip() and not allow_empty:
         raise _validation_error(["answer"], "Ответ не может быть пустым")
     candidates = accepted_answers if isinstance(accepted_answers, list) else [accepted_answers]
     correct = answer.strip().casefold() in {candidate.strip().casefold() for candidate in candidates}
@@ -547,6 +628,37 @@ def _fill_check(session: ExerciseSession, action: dict[str, Any]) -> bool:
     return True
 
 
+def _fill_group_check(session: ExerciseSession, action: dict[str, Any]) -> bool:
+    content_groups = [
+        part["blanks"]
+        for item in session.state["content"]["items"] for part in item["parts"]
+        if part["kind"] == "blank_group"
+    ]
+    matching_group = next(
+        (group for group in content_groups if [blank["id"] for blank in group] == action["blank_ids"]),
+        None,
+    )
+    if matching_group is None:
+        raise HTTPException(status_code=409, detail="Группа пропусков не входит в снимок сессии")
+    if not action["answer"].strip():
+        raise _validation_error(["answer"], "Ответ не может быть пустым")
+    blanks = session.state["progress"]["blanks"]
+    if any(action["expected_attempts_used"][blank["id"]] != blanks[blank["id"]]["attempts_used"] for blank in matching_group):
+        return False
+    words = action["answer"].split()
+    cursor = 0
+    changed = False
+    for group_blank in matching_group:
+        blank_id, word_count = group_blank["id"], group_blank["word_count"]
+        fragment = " ".join(words[cursor:cursor + word_count])
+        cursor += word_count
+        blank = blanks[blank_id]
+        if blank["status"] == "open":
+            _check_answer(blank, fragment, session.state["answers"][blank_id], allow_empty=True)
+            changed = True
+    return changed
+
+
 def apply_session_action(db: Session, slug: str, public_id: str, user_id: int, action: dict[str, Any]) -> dict[str, Any]:
     session = _active_session(db, slug, public_id, user_id, lock=True)
     action_type = action["action"]
@@ -558,6 +670,7 @@ def apply_session_action(db: Session, slug: str, public_id: str, user_id: int, a
         "self_check_reveal": ("self_check", _self_reveal),
         "self_check_mark": ("self_check", _self_mark),
         "fill_blank_check": ("fill_blanks", _fill_check),
+        "fill_blank_group_check": ("fill_blanks", _fill_group_check),
     }
     expected_type, handler = handlers[action_type]
     if expected_type != type_code:

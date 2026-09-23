@@ -21,6 +21,7 @@ class Exercise(Base):
     estimated_duration_minutes = Column(Integer, nullable=True)
     display_order = Column(Integer, nullable=False, default=0)
     status = Column(String(20), nullable=False, default="draft")
+    rule_id = Column(Integer, ForeignKey("rules.id", ondelete="RESTRICT"), nullable=False, index=True)
     definition = Column(JSONB, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

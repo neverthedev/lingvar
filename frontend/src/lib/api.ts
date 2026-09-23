@@ -52,14 +52,15 @@ export interface LoginCredentials {
 
 export type ExerciseTypeCode = 'form_table' | 'single_input' | 'self_check' | 'fill_blanks'
 export interface ExerciseCatalogItem { slug: string; title: string; description: string; difficulty: 'beginner' | 'intermediate' | 'advanced'; estimated_duration_minutes: number | null; type_code: ExerciseTypeCode }
-export interface ExerciseMetadata { id: number; slug: string; title: string; type_code: ExerciseTypeCode; schema_version: number; status: 'draft' | 'published'; display_order: number }
+export interface ExerciseCatalogGroup { root_rule: { id: number; title: string }; exercises: ExerciseCatalogItem[] }
+export interface ExerciseMetadata { id: number; slug: string; title: string; type_code: ExerciseTypeCode; schema_version: number; status: 'draft' | 'published'; display_order: number; rule_id: number }
 export interface ExerciseType { code: ExerciseTypeCode; label: string; schema_version: number }
 export interface ExerciseRecord extends ExerciseMetadata { description: string; instruction: string; difficulty: 'beginner' | 'intermediate' | 'advanced'; estimated_duration_minutes: number | null; definition: ExerciseDefinition }
 export type ColumnDefinition = { key: string; label: string }
 export type FormTableDefinition = { source_code: string; columns: ColumnDefinition[]; sample_size: number | null; max_attempts: 3 }
 export type SingleInputDefinition = { source_code: string; sample_size: number | null; max_attempts: 3; reveal_after_exhaustion: true }
 export type SelfCheckDefinition = { source_code: string; sample_size: number | null }
-export type FillBlankPartDefinition = { kind: 'blank'; id: string; hint: string | null; accepted_answers: string[] }
+export type FillBlankPartDefinition = { kind: 'blank'; id: string; hint: string | null; rule_id: number | null; accepted_answers: string[] }
 export type FillTextPartDefinition = { kind: 'text'; text: string }
 export type FillBlanksDefinition = { items: Array<{ id: string; parts: Array<FillBlankPartDefinition | FillTextPartDefinition> }> }
 export type ExerciseDefinition = FormTableDefinition | SingleInputDefinition | SelfCheckDefinition | FillBlanksDefinition
@@ -67,7 +68,7 @@ export type ExerciseContent = { slug: string; title: string; description: string
   { type_code: 'form_table'; content: { columns: ColumnDefinition[]; max_attempts: 3; statistics_word_type: string; rows: Array<{id:number; prompt:string; answers:Record<string,string>; weight?:number}> } } |
   { type_code: 'single_input'; content: { max_attempts: 3; reveal_after_exhaustion: true; items: Array<{id:number;prompt:string;answer:string}> } } |
   { type_code: 'self_check'; content: { items: Array<{id:number;prompt:string;answer:string}> } } |
-  { type_code: 'fill_blanks'; content: { items: Array<{id:string;parts:Array<{kind:'text';text:string}|{kind:'blank';id:string;hint:string|null}>}> } }
+  { type_code: 'fill_blanks'; content: { items: Array<{id:string;parts:Array<{kind:'text';text:string}|{kind:'blank';id:string;hint:string|null}|{kind:'blank_group';blanks:Array<{id:string;word_count:number}>}>}> } }
 )
 
 export type AnswerState = { value: string | null; attempts_used: number; status: 'open' | 'correct' | 'exhausted'; last_check: 'correct' | 'incorrect' | null; revealed_answer?: string; revealed_answers?: string[] }
@@ -101,7 +102,7 @@ export type ExerciseSessionSnapshot = ExerciseSessionBase & (
   }
   | {
     type_code: 'fill_blanks'
-    content: { items: Array<{ id: string; parts: Array<{ kind: 'text'; text: string } | { kind: 'blank'; id: string; hint: string | null }> }> }
+    content: { items: Array<{ id: string; parts: Array<{ kind: 'text'; text: string } | { kind: 'blank'; id: string; hint: string | null } | { kind: 'blank_group'; blanks: Array<{ id: string; word_count: number }> }> }> }
     progress: { blanks: Record<string, AnswerState> }
   }
 )
@@ -112,6 +113,7 @@ export type ExerciseSessionAction =
   | { action: 'self_check_reveal'; item_id: number }
   | { action: 'self_check_mark'; item_id: number; result: 'correct' | 'incorrect' }
   | { action: 'fill_blank_check'; blank_id: string; answer: string; expected_attempts_used: number }
+  | { action: 'fill_blank_group_check'; blank_ids: string[]; answer: string; expected_attempts_used: Record<string, number> }
 
 export interface RuleNode {
   id: number
@@ -401,7 +403,7 @@ export class ApiService {
   static getAdminExercise(id: number): Promise<ExerciseRecord> { return this.adminRequest<ExerciseRecord>(`${API_ENDPOINTS.adminExercises}/${id}`, { method: 'GET' }, 'Не удалось загрузить упражнение') }
   static createAdminExercise(payload: Omit<ExerciseRecord, 'id'>): Promise<ExerciseRecord> { return this.adminRequest<ExerciseRecord>(API_ENDPOINTS.adminExercises, { method: 'POST', body: JSON.stringify(payload) }, 'Не удалось создать упражнение') }
   static updateAdminExercise(id: number, payload: Omit<ExerciseRecord, 'id' | 'slug' | 'type_code' | 'schema_version'>): Promise<ExerciseRecord> { return this.adminRequest<ExerciseRecord>(`${API_ENDPOINTS.adminExercises}/${id}`, { method: 'PUT', body: JSON.stringify(payload) }, 'Не удалось сохранить упражнение') }
-  static async getExercises(): Promise<ExerciseCatalogItem[]> { return this.adminRequest<ExerciseCatalogItem[]>(API_ENDPOINTS.exercises, { method: 'GET' }, 'Не удалось загрузить каталог') }
+  static async getExercises(): Promise<ExerciseCatalogGroup[]> { return this.adminRequest<ExerciseCatalogGroup[]>(API_ENDPOINTS.exercises, { method: 'GET' }, 'Не удалось загрузить каталог') }
   static async getExerciseContent(slug: string): Promise<ExerciseContent> { return this.adminRequest<ExerciseContent>(`${API_ENDPOINTS.exercises}${slug}/content`, { method: 'GET' }, 'Не удалось загрузить упражнение') }
   static createExerciseSession(slug: string): Promise<ExerciseSessionSnapshot> { return this.learnerRequest(`${API_ENDPOINTS.exercises}${slug}/sessions`, { method: 'POST' }, 'Не удалось начать упражнение') }
   static getExerciseSession(slug: string, sessionId: string): Promise<ExerciseSessionSnapshot> { return this.learnerRequest(`${API_ENDPOINTS.exercises}${slug}/sessions/${encodeURIComponent(sessionId)}`, { method: 'GET' }, 'Не удалось восстановить упражнение') }

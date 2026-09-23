@@ -40,12 +40,12 @@ def _fill_definition() -> dict:
     ]}]}
 
 
-def _exercise_payload(type_code: str, definition: dict, *, slug: str, status: str = "draft") -> dict:
+def _exercise_payload(type_code: str, definition: dict, *, slug: str, status: str = "draft", rule_id: int = 1) -> dict:
     return {
         "slug": slug, "type_code": type_code, "schema_version": 1,
         "title": f"QA {type_code}", "description": "Integration exercise",
         "instruction": "Complete the exercise", "difficulty": "beginner",
-        "estimated_duration_minutes": 5, "display_order": 50, "status": status,
+        "estimated_duration_minutes": 5, "display_order": 50, "status": status, "rule_id": rule_id,
         "definition": definition,
     }
 
@@ -87,7 +87,7 @@ def test_administrator_validates_and_manages_each_supported_exercise_type(test_e
             assert updated.json()["title"] == replacement["title"]
 
         student = _student_headers(client)
-        assert all(item["slug"] != "qa-fill-blanks" for item in client.get("/api/exercises/", headers=student).json())
+        assert all(item["slug"] != "qa-fill-blanks" for group in client.get("/api/exercises/", headers=student).json() for item in group["exercises"])
         assert client.get("/api/exercises/qa-fill-blanks/content", headers=student).status_code == 404
 
         fill = created["fill_blanks"]
@@ -99,7 +99,7 @@ def test_administrator_validates_and_manages_each_supported_exercise_type(test_e
         assert published.json()["slug"] == "qa-fill-blanks"
         assert published.json()["status"] == "published"
         listed = client.get("/api/exercises/", headers=student)
-        assert [item["slug"] for item in listed.json()].count("qa-fill-blanks") == 1
+        assert [item["slug"] for group in listed.json() for item in group["exercises"]].count("qa-fill-blanks") == 1
         content = client.get("/api/exercises/qa-fill-blanks/content", headers=student)
         assert content.status_code == 200, content.text
         assert "accepted_answers" not in str(content.json())
@@ -169,6 +169,196 @@ def test_administrator_validates_and_manages_each_supported_exercise_type(test_e
         )
         duplicate = client.post("/admin/exercises", headers=admin, json=_exercise_payload("self_check", definitions["self_check"], slug="qa-self-check"))
         assert duplicate.status_code == 409, duplicate.text
+
+
+def test_rule_assignments_are_validated_and_keep_the_tree_atomic(test_engine, test_database_url):
+    """Exercises and blanks only keep references that remain in one rule branch."""
+    upgrade_schema(test_database_url)
+    from main import app
+
+    with TestClient(app) as client:
+        admin = _admin_headers(client, test_database_url)
+
+        def create_rule(title: str, parent_rule_id: int | None = None) -> dict:
+            response = client.post("/admin/rules", headers=admin, json={
+                "title": title, "description": f"Описание {title}", "parent_rule_id": parent_rule_id,
+            })
+            assert response.status_code == 201, response.text
+            return response.json()
+
+        root = create_rule("Падежи QA")
+        exercise_rule = create_rule("Винительный QA", root["id"])
+        blank_rule = create_rule("Одушевлённые QA", exercise_rule["id"])
+        other_root = create_rule("Времена QA")
+        movable = create_rule("Переносимое QA", root["id"])
+        definition = {"items": [{"id": "sentence", "parts": [
+            {"kind": "blank", "id": "optional", "hint": "подсказка", "rule_id": None, "accepted_answers": ["dom"]},
+            {"kind": "text", "text": " и "},
+            {"kind": "blank", "id": "descendant", "hint": None, "rule_id": blank_rule["id"], "accepted_answers": ["zielony"]},
+        ]}]}
+        created = client.post("/admin/exercises", headers=admin, json=_exercise_payload(
+            "fill_blanks", definition, slug="qa-rule-assignment", rule_id=exercise_rule["id"],
+        ))
+        assert created.status_code == 201, created.text
+        assert created.json()["rule_id"] == exercise_rule["id"]
+
+        form_definition = {"source_code": "nouns_singular_cases", "sample_size": 1, "max_attempts": 3,
+                           "columns": [{"key": "dopełniacz", "label": "Dopełniacz"}]}
+        different_type = client.post("/admin/exercises", headers=admin, json=_exercise_payload(
+            "form_table", form_definition, slug="qa-rule-assignment-form", rule_id=root["id"],
+        ))
+        assert different_type.status_code == 201, different_type.text
+
+        before_exercise_rule_delete = client.get("/admin/rules", headers=admin).json()
+        exercise_rule_delete = client.delete(f"/admin/rules/{root['id']}", headers=admin)
+        assert exercise_rule_delete.status_code == 409, exercise_rule_delete.text
+        assert client.get("/admin/rules", headers=admin).json() == before_exercise_rule_delete
+
+        for payload, location in (
+            (_exercise_payload("fill_blanks", definition, slug="qa-unknown-exercise-rule", rule_id=999999), ["body", "rule_id"]),
+            (_exercise_payload("fill_blanks", {"items": [{"id": "one", "parts": [
+                {"kind": "blank", "id": "unknown", "hint": None, "rule_id": 999999, "accepted_answers": ["dom"]},
+            ]}]}, slug="qa-unknown-blank-rule", rule_id=exercise_rule["id"]), ["body", "definition", "items", 0, "parts", 0, "rule_id"]),
+            (_exercise_payload("fill_blanks", {"items": [{"id": "one", "parts": [
+                {"kind": "blank", "id": "outside", "hint": None, "rule_id": other_root["id"], "accepted_answers": ["dom"]},
+            ]}]}, slug="qa-outside-blank-rule", rule_id=exercise_rule["id"]), ["body", "definition", "items", 0, "parts", 0, "rule_id"]),
+        ):
+            rejected = client.post("/admin/exercises", headers=admin, json=payload)
+            assert rejected.status_code == 422, rejected.text
+            assert rejected.json()["detail"][0]["loc"] == location
+
+        before_delete = client.get("/admin/rules", headers=admin).json()
+        deleted = client.delete(f"/admin/rules/{blank_rule['id']}", headers=admin)
+        assert deleted.status_code == 409, deleted.text
+        assert client.get("/admin/rules", headers=admin).json() == before_delete
+
+        invalid_move = client.put(f"/admin/rules/{blank_rule['id']}", headers=admin, json={
+            "title": blank_rule["title"], "description": blank_rule["description"], "parent_rule_id": other_root["id"],
+        })
+        assert invalid_move.status_code == 409, invalid_move.text
+        with test_engine.connect() as connection:
+            assert connection.execute(text("SELECT parent_rule_id FROM rules WHERE id = :id"), {"id": blank_rule["id"]}).scalar_one() == exercise_rule["id"]
+
+        valid_move = client.put(f"/admin/rules/{movable['id']}", headers=admin, json={
+            "title": movable["title"], "description": movable["description"], "parent_rule_id": other_root["id"],
+        })
+        assert valid_move.status_code == 200, valid_move.text
+        assert valid_move.json()["parent_rule_id"] == other_root["id"]
+
+
+def test_catalog_groups_exercises_by_root_rule_and_keeps_catalog_order(test_engine, test_database_url):
+    """Learner catalog groups descendants under roots without exposing drafts."""
+    upgrade_schema(test_database_url)
+    with test_engine.begin() as connection:
+        connection.execute(text("UPDATE exercises SET status = 'draft'"))
+    from main import app
+
+    with TestClient(app) as client:
+        admin = _admin_headers(client, test_database_url)
+        student = _student_headers(client, "catalog-rule-student-qa")
+
+        def create_rule(title: str, parent_rule_id: int | None = None) -> dict:
+            response = client.post("/admin/rules", headers=admin, json={
+                "title": title, "description": title, "parent_rule_id": parent_rule_id,
+            })
+            assert response.status_code == 201, response.text
+            return response.json()
+
+        root_late = create_rule("Поздний корень QA")
+        root_first = create_rule("Ранний корень QA")
+        child = create_rule("Подправило QA", root_first["id"])
+        definition = {"items": [{"id": "one", "parts": [{"kind": "blank", "id": "answer", "hint": "x", "accepted_answers": ["x"]}]}]}
+        for slug, rule_id, display_order, status in (
+            ("qa-catalog-child", child["id"], 7, "published"),
+            ("qa-catalog-root", root_first["id"], 3, "published"),
+            ("qa-catalog-late", root_late["id"], 1, "published"),
+            ("qa-catalog-draft", root_first["id"], 0, "draft"),
+        ):
+            payload = _exercise_payload("fill_blanks", definition, slug=slug, status=status, rule_id=rule_id)
+            payload["display_order"] = display_order
+            response = client.post("/admin/exercises", headers=admin, json=payload)
+            assert response.status_code == 201, response.text
+
+        catalog = client.get("/api/exercises/", headers=student)
+        assert catalog.status_code == 200, catalog.text
+        assert [(group["root_rule"]["title"], [item["slug"] for item in group["exercises"]]) for group in catalog.json()] == [
+            ("Поздний корень QA", ["qa-catalog-late"]),
+            ("Ранний корень QA", ["qa-catalog-root", "qa-catalog-child"]),
+        ]
+
+
+def test_blank_groups_split_answers_and_preserve_independent_state(test_engine, test_database_url):
+    """One grouped action splits words by each blank's expected answer length."""
+    upgrade_schema(test_database_url)
+    from main import app
+
+    definition = {"items": [{"id": "sentence", "parts": [
+        {"kind": "text", "text": "To "},
+        {"kind": "blank", "id": "color", "hint": None, "accepted_answers": ["zielony"]},
+        {"kind": "blank", "id": "person", "hint": None, "accepted_answers": ["kolega Mateusz"]},
+        {"kind": "text", "text": "."},
+    ]}]}
+    with TestClient(app) as client:
+        admin = _admin_headers(client, test_database_url)
+        created = client.post("/admin/exercises", headers=admin, json=_exercise_payload(
+            "fill_blanks", definition, slug="qa-blank-group", status="published",
+        ))
+        assert created.status_code == 201, created.text
+        invalid = client.post("/admin/exercises", headers=admin, json=_exercise_payload(
+            "fill_blanks", {"items": [{"id": "invalid", "parts": [
+                {"kind": "blank", "id": "different-lengths", "hint": None, "accepted_answers": ["dom", "biały dom"]},
+            ]}]}, slug="qa-blank-group-invalid",
+        ))
+        assert invalid.status_code == 422, invalid.text
+        assert invalid.json()["detail"][0]["loc"][-1] == "accepted_answers"
+
+        student = _student_headers(client, "blank-group-student-qa")
+        exact = client.post("/api/exercises/qa-blank-group/sessions", headers=student).json()
+        parts = exact["content"]["items"][0]["parts"]
+        assert parts[1] == {"kind": "blank_group", "blanks": [{"id": "color", "word_count": 1}, {"id": "person", "word_count": 2}]}
+        grouped_blanks = parts[1]["blanks"]
+        assert all(
+            set(blank) == {"id", "word_count"}
+            and isinstance(blank["id"], str)
+            and isinstance(blank["word_count"], int)
+            and blank["word_count"] > 0
+            for blank in grouped_blanks
+        )
+        assert "accepted_answers" not in str(exact["content"])
+        assert "rule_id" not in str(exact["content"])
+        action_url = f"/api/exercises/qa-blank-group/sessions/{exact['session_id']}/actions"
+        checked = client.post(action_url, headers=student, json={
+            "action": "fill_blank_group_check", "blank_ids": ["color", "person"],
+            "answer": "zielony kolega Mateusz", "expected_attempts_used": {"color": 0, "person": 0},
+        })
+        assert checked.status_code == 200, checked.text
+        assert checked.json()["revision"] == 2
+        assert {key: value["status"] for key, value in checked.json()["progress"]["blanks"].items()} == {"color": "correct", "person": "correct"}
+
+        partial = client.post("/api/exercises/qa-blank-group/sessions", headers=student).json()
+        partial_url = f"/api/exercises/qa-blank-group/sessions/{partial['session_id']}/actions"
+        first = client.post(partial_url, headers=student, json={
+            "action": "fill_blank_group_check", "blank_ids": ["color", "person"],
+            "answer": "zielony kolega", "expected_attempts_used": {"color": 0, "person": 0},
+        })
+        assert first.status_code == 200, first.text
+        assert first.json()["revision"] == 2
+        assert first.json()["progress"]["blanks"]["color"]["attempts_used"] == 1
+        assert first.json()["progress"]["blanks"]["person"] == {"value": "kolega", "attempts_used": 1, "status": "open", "last_check": "incorrect"}
+        corrected = client.post(partial_url, headers=student, json={
+            "action": "fill_blank_group_check", "blank_ids": ["color", "person"],
+            "answer": "zielony kolega Mateusz лишнее", "expected_attempts_used": {"color": 1, "person": 1},
+        })
+        assert corrected.status_code == 200, corrected.text
+        assert corrected.json()["revision"] == 3
+        assert corrected.json()["progress"]["blanks"]["color"]["attempts_used"] == 1
+        assert corrected.json()["progress"]["blanks"]["person"]["status"] == "correct"
+        stale = client.post(partial_url, headers=student, json={
+            "action": "fill_blank_group_check", "blank_ids": ["color", "person"],
+            "answer": "zielony kolega Mateusz", "expected_attempts_used": {"color": 0, "person": 0},
+        })
+        assert stale.status_code == 200, stale.text
+        assert stale.json()["revision"] == 3
 
 
 def test_legacy_exercise_endpoints_keep_their_original_flat_payloads_via_shared_sources(test_engine, test_database_url):
