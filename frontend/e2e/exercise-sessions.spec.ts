@@ -14,7 +14,8 @@ async function expectAttemptDots(page: Page, blankId: string, states: Array<keyo
   const container = page.locator(`[data-blank-id="${blankId}"]`)
   const dots = container.locator('[data-attempt-state]')
   await expect(dots).toHaveCount(3)
-  await expect(container).toHaveAttribute('aria-hidden', 'true')
+  await expect(container).toHaveRole('button')
+  await expect(container.locator('[aria-hidden="true"]')).toHaveCount(1)
   for (let index = 0; index < states.length; index += 1) {
     const state = states[index]
     await expect(dots.nth(index)).toHaveAttribute('data-attempt-state', state)
@@ -91,6 +92,24 @@ async function createFillExercise() {
   const rules = await api.get('/admin/rules', { headers })
   expect(rules.status()).toBe(200)
   const ruleId = (await rules.json() as Array<{ id: number }>)[0].id
+  const explicitRuleResponse = await api.post('/admin/rules', { headers, data: {
+    title: 'Явное правило browser QA', description: 'Описание явного правила browser QA', parent_rule_id: ruleId,
+  } })
+  expect(explicitRuleResponse.status()).toBe(201)
+  const explicitRule = await explicitRuleResponse.json() as { id: number }
+  const explicitChildResponse = await api.post('/admin/rules', { headers, data: {
+    title: 'Подправило browser QA', description: 'Описание подправила browser QA', parent_rule_id: explicitRule.id,
+  } })
+  expect(explicitChildResponse.status()).toBe(201)
+  const explicitChild = await explicitChildResponse.json() as { id: number }
+  const explicitGrandchildResponse = await api.post('/admin/rules', { headers, data: {
+    title: 'Глубокое подправило browser QA', description: 'Описание глубокого подправила browser QA', parent_rule_id: explicitChild.id,
+  } })
+  expect(explicitGrandchildResponse.status()).toBe(201)
+  const siblingRuleResponse = await api.post('/admin/rules', { headers, data: {
+    title: 'Соседнее подправило browser QA', description: 'Описание соседнего подправила browser QA', parent_rule_id: explicitRule.id,
+  } })
+  expect(siblingRuleResponse.status()).toBe(201)
   const created = await api.post('/admin/exercises', {
     headers,
     data: {
@@ -99,7 +118,7 @@ async function createFillExercise() {
       difficulty: 'beginner', estimated_duration_minutes: 5, display_order: 90, status: 'published', rule_id: ruleId,
       definition: { items: [{ id: 'sentence-1', parts: [
         { kind: 'text', text: 'Mam ' },
-        { kind: 'blank', id: 'cat', hint: 'kot', accepted_answers: ['kota'] },
+        { kind: 'blank', id: 'cat', hint: 'kot', rule_id: explicitRule.id, accepted_answers: ['kota'] },
         { kind: 'text', text: ' oraz ' },
         { kind: 'blank', id: 'dog', hint: 'pies', accepted_answers: ['psa', 'pieska'] },
         { kind: 'text', text: ' i ' },
@@ -236,7 +255,9 @@ test('fill blanks submits on blur or Enter, restores server state, and restarts 
   await cat.press('Enter')
   await correctResponse
   await expect.poll(() => actionRequests).toBe(3)
-  await expect(cat).toBeDisabled()
+  await expect(cat).toBeEnabled()
+  await expect(cat).toHaveAttribute('readonly', '')
+  await expect(cat).not.toBeEditable()
   await expect(cat).toHaveCSS('background-color', 'rgb(240, 253, 244)')
   await expect(cat).toHaveCSS('border-color', 'rgb(74, 222, 128)')
   await expectAttemptDots(page, 'cat', ['red', 'red', 'green'])
@@ -245,15 +266,68 @@ test('fill blanks submits on blur or Enter, restores server state, and restarts 
   await expect(page.getByText('OK', { exact: true })).toHaveCount(0)
   await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '1')
 
+  await cat.focus()
+  const catRuleTooltip = page.getByRole('tooltip')
+  await expect(catRuleTooltip).toContainText('Явное правило browser QA')
+  await expect(catRuleTooltip).toContainText('Подправило browser QA')
+  await expect(catRuleTooltip).toContainText('Глубокое подправило browser QA')
+  await expect(catRuleTooltip).toContainText('Соседнее подправило browser QA')
+  const catRuleText = await catRuleTooltip.innerText()
+  expect(catRuleText.indexOf('Явное правило browser QA')).toBeLessThan(catRuleText.indexOf('Подправило browser QA'))
+  expect(catRuleText.indexOf('Подправило browser QA')).toBeLessThan(catRuleText.indexOf('Глубокое подправило browser QA'))
+  await cat.press('Escape')
+  await expect(cat).toBeFocused()
+  await expect(page.getByRole('tooltip')).toHaveCount(0)
+
+  const catHistory = page.getByRole('button', { name: 'История ответов для пропуска 1' })
+  await catHistory.focus()
+  await expect(catHistory).toHaveAttribute('aria-expanded', 'true')
+  const catHistoryId = await catHistory.getAttribute('aria-controls')
+  expect(catHistoryId).toBeTruthy()
+  await expect(catHistory).toHaveAttribute('aria-describedby', new RegExp(catHistoryId!))
+  await expect(catHistory).toHaveClass(/focus-visible:ring-2/)
+  const catHistoryTooltip = page.getByRole('tooltip')
+  await expect(catHistoryTooltip).toContainText('История ответов')
+  await expect(catHistoryTooltip.locator('ol li')).toHaveText(['wrong', 'still-wrong', 'KOTA'])
+  await catHistory.hover()
+  await catHistoryTooltip.hover()
+  await expect(catHistoryTooltip).toBeVisible()
+  // Pointer may leave the wrapper while the trigger still owns focus.
+  await page.mouse.move(0, 0)
+  await expect(catHistoryTooltip).toBeVisible()
+  // The inverse transition also keeps it open: focus moves into the panel while
+  // the pointer is outside, then pointer re-enters and leaves the panel again.
+  await catHistoryTooltip.focus()
+  await expect(catHistoryTooltip).toBeVisible()
+  await catHistoryTooltip.hover()
+  await expect(catHistoryTooltip).toBeVisible()
+  await page.mouse.move(0, 0)
+  await expect(catHistoryTooltip).toBeVisible()
+  // Only after both pointer and focus leave does the popover close.
+  await dog.focus()
+  await expect(catHistoryTooltip).toBeHidden()
+  await catHistory.focus()
+  await expect(catHistoryTooltip).toBeVisible()
+  await catHistory.press('Escape')
+  await expect(catHistory).toBeFocused()
+  await expect(page.getByRole('tooltip')).toHaveCount(0)
+
   const dogResponse = page.waitForResponse(response => response.url().includes(`/sessions/${originalId}/actions`) && response.request().method() === 'POST')
   await dog.fill('PSA')
   await dog.blur()
   await dogResponse
-  await expect(dog).toBeDisabled()
+  await expect(dog).toBeEnabled()
+  await expect(dog).toHaveAttribute('readonly', '')
+  await expect(dog).not.toBeEditable()
   await expect(dog).toHaveCSS('background-color', 'rgb(240, 253, 244)')
   await expect(dog).toHaveCSS('border-color', 'rgb(74, 222, 128)')
   await expectAttemptDots(page, 'dog', ['green', 'gray', 'gray'])
   await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '2')
+  await dog.focus()
+  await expect(page.getByRole('tooltip')).toContainText('Правила польского языка')
+  await expect(page.getByRole('tooltip')).toContainText('Явное правило browser QA')
+  await dog.press('Escape')
+  await expect(dog).toBeFocused()
 
   await page.route('**/api/exercises/browser-session-fill-qa/sessions/*/actions', route => route.abort('failed'))
   await bird.fill('network-error')
@@ -262,6 +336,10 @@ test('fill blanks submits on blur or Enter, restores server state, and restarts 
   await expect(bird).toBeEnabled()
   await expectAttemptDots(page, 'bird', ['gray', 'gray', 'gray'])
   await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '2')
+  const birdHistory = page.getByRole('button', { name: 'История ответов для пропуска 3' })
+  await birdHistory.focus()
+  await expect(page.getByRole('tooltip')).toContainText('Пока нет проверенных ответов')
+  await birdHistory.press('Escape')
   await page.unroute('**/api/exercises/browser-session-fill-qa/sessions/*/actions')
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -270,7 +348,9 @@ test('fill blanks submits on blur or Enter, restores server state, and restarts 
     await bird.blur()
     await response
   }
-  await expect(bird).toBeDisabled()
+  await expect(bird).toBeEnabled()
+  await expect(bird).toHaveAttribute('readonly', '')
+  await expect(bird).not.toBeEditable()
   await expect(bird).toHaveValue('ptaka')
   await expect(bird).toHaveCSS('background-color', 'rgb(254, 242, 242)')
   await expect(bird).toHaveCSS('border-color', 'rgb(248, 113, 113)')
@@ -280,12 +360,16 @@ test('fill blanks submits on blur or Enter, restores server state, and restarts 
   await page.reload()
   await expect(page).toHaveURL(originalUrl)
   await expect(inputs.first()).toHaveValue('KOTA')
-  await expect(inputs.first()).toBeDisabled()
+  await expect(inputs.first()).toBeEnabled()
+  await expect(inputs.first()).toHaveAttribute('readonly', '')
   await expect(page.getByRole('textbox', { name: 'Ответ для задания 1' }).nth(2)).toHaveValue('ptaka')
   await expectAttemptDots(page, 'cat', ['red', 'red', 'green'])
   await expectAttemptDots(page, 'bird', ['red', 'red', 'red'])
   await expect(page.locator('#status-cat')).toHaveText('Верно · 3 из 3')
   await expect(page.locator('#status-bird')).toHaveText('Попытки закончились. Ответ: ptaka')
+  await page.getByRole('button', { name: 'История ответов для пропуска 1' }).focus()
+  await expect(page.getByRole('tooltip').locator('ol li')).toHaveText(['wrong', 'still-wrong', 'KOTA'])
+  await page.getByRole('button', { name: 'История ответов для пропуска 1' }).press('Escape')
 
   const restartResponse = page.waitForResponse(response => response.url().includes(`/sessions/${originalId}/restart`) && response.request().method() === 'POST')
   await page.getByRole('button', { name: 'Начать заново' }).click()
@@ -295,7 +379,11 @@ test('fill blanks submits on blur or Enter, restores server state, and restarts 
   const resetId = restartBody.session_id
   await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0')
   await expect(page.getByText('0 / 3', { exact: true })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Ответ для задания 1' }).first()).not.toHaveAttribute('readonly', '')
   await expectAttemptDots(page, 'cat', ['gray', 'gray', 'gray'])
+  await page.getByRole('button', { name: 'История ответов для пропуска 1' }).focus()
+  await expect(page.getByRole('tooltip')).toContainText('Пока нет проверенных ответов')
+  await page.getByRole('button', { name: 'История ответов для пропуска 1' }).press('Escape')
 
   await page.goto(`/exercises/browser-session-fill-qa?session_id=missing-session`)
   await expect(page).toHaveURL(new RegExp(`/exercises/browser-session-fill-qa\\?session_id=${publicId}$`))
@@ -390,14 +478,28 @@ test('catalog groups rules and a grouped blank input keeps partial progress inde
   } })
   expect(root.status()).toBe(201)
   const ruleId = (await root.json() as { id: number }).id
+  const colorRule = await api.post('/admin/rules', { headers, data: {
+    title: 'Правило цвета UI', description: 'Описание правила цвета UI', parent_rule_id: ruleId,
+  } })
+  expect(colorRule.status()).toBe(201)
+  const colorRuleId = (await colorRule.json() as { id: number }).id
+  const colorChild = await api.post('/admin/rules', { headers, data: {
+    title: 'Подправило цвета UI', description: 'Описание подправила цвета UI', parent_rule_id: colorRuleId,
+  } })
+  expect(colorChild.status()).toBe(201)
+  const personRule = await api.post('/admin/rules', { headers, data: {
+    title: 'Правило лица UI', description: 'Описание правила лица UI', parent_rule_id: ruleId,
+  } })
+  expect(personRule.status()).toBe(201)
+  const personRuleId = (await personRule.json() as { id: number }).id
   const created = await api.post('/admin/exercises', { headers, data: {
     slug: 'browser-grouped-blanks-qa', type_code: 'fill_blanks', schema_version: 1,
     title: 'Групповые пропуски', description: 'Проверка общего поля', instruction: 'Заполните пропуски',
     difficulty: 'beginner', estimated_duration_minutes: 5, display_order: 1, status: 'published', rule_id: ruleId,
     definition: { items: [{ id: 'sentence', parts: [
       { kind: 'text', text: 'To ' },
-      { kind: 'blank', id: 'color', hint: null, accepted_answers: ['zielony'] },
-      { kind: 'blank', id: 'person', hint: null, accepted_answers: ['kolega Mateusz'] },
+      { kind: 'blank', id: 'color', hint: null, rule_id: colorRuleId, accepted_answers: ['zielony'] },
+      { kind: 'blank', id: 'person', hint: null, rule_id: personRuleId, accepted_answers: ['kolega Mateusz'] },
       { kind: 'text', text: '.' },
     ] }] },
   } })
@@ -433,6 +535,18 @@ test('catalog groups rules and a grouped blank input keeps partial progress inde
   await expectAttemptDots(page, 'person', ['red', 'gray', 'gray'])
   await expect(grouped).toBeEnabled()
   await grouped.focus()
+  const firstGroupedHint = page.getByRole('tooltip')
+  await expect(firstGroupedHint).toContainText('Пропуск 1')
+  await expect(firstGroupedHint).toContainText('Правило цвета UI')
+  await expect(firstGroupedHint).toContainText('Подправило цвета UI')
+  await expect(firstGroupedHint).not.toContainText('Правило лица UI')
+  await grouped.press('Escape')
+  await expect(grouped).toBeFocused()
+  const colorHistory = page.getByRole('button', { name: 'История ответов для пропуска 1' })
+  await colorHistory.focus()
+  await expect(page.getByRole('tooltip').locator('ol li')).toHaveText(['zielony'])
+  await colorHistory.press('Escape')
+  await grouped.focus()
   await grouped.blur()
   await expect.poll(() => groupActions).toBe(1)
   await expectAttemptDots(page, 'color', ['green', 'gray', 'gray'])
@@ -444,7 +558,23 @@ test('catalog groups rules and a grouped blank input keeps partial progress inde
   await expect.poll(() => groupActions).toBe(2)
   await expectAttemptDots(page, 'color', ['green', 'gray', 'gray'])
   await expectAttemptDots(page, 'person', ['red', 'green', 'gray'])
-  await expect(grouped).toBeDisabled()
+  await expect(grouped).toBeEnabled()
+  await expect(grouped).toHaveAttribute('readonly', '')
+  await expect(grouped).not.toBeEditable()
+  await grouped.focus()
+  const bothGroupedHint = page.getByRole('tooltip')
+  await expect(bothGroupedHint).toContainText('Пропуск 1')
+  await expect(bothGroupedHint).toContainText('Пропуск 2')
+  await expect(bothGroupedHint).toContainText('Правило цвета UI')
+  await expect(bothGroupedHint).toContainText('Правило лица UI')
+  const bothHintText = await bothGroupedHint.innerText()
+  expect(bothHintText.indexOf('Пропуск 1')).toBeLessThan(bothHintText.indexOf('Пропуск 2'))
+  await grouped.press('Escape')
+  await expect(grouped).toBeFocused()
+  const personHistory = page.getByRole('button', { name: 'История ответов для пропуска 2' })
+  await personHistory.focus()
+  await expect(page.getByRole('tooltip').locator('ol li')).toHaveText(['kolega', 'kolega Mateusz'])
+  await personHistory.press('Escape')
 
   const exhaust = async (answer: string) => {
     const session = await api.post('/api/exercises/browser-grouped-blanks-qa/sessions', { headers: learnerHeaders })
@@ -461,12 +591,14 @@ test('catalog groups rules and a grouped blank input keeps partial progress inde
     return input
   }
   const oneExhausted = await exhaust('wrong kolega Mateusz')
-  await expect(oneExhausted).toBeDisabled()
+  await expect(oneExhausted).toBeEnabled()
+  await expect(oneExhausted).toHaveAttribute('readonly', '')
   await expect(oneExhausted).toHaveValue('zielony kolega Mateusz')
   await expectAttemptDots(page, 'color', ['red', 'red', 'red'])
   await expectAttemptDots(page, 'person', ['green', 'gray', 'gray'])
   const allExhausted = await exhaust('wrong wrong')
-  await expect(allExhausted).toBeDisabled()
+  await expect(allExhausted).toBeEnabled()
+  await expect(allExhausted).toHaveAttribute('readonly', '')
   await expect(allExhausted).toHaveValue('zielony kolega Mateusz')
   await expectAttemptDots(page, 'color', ['red', 'red', 'red'])
   await expectAttemptDots(page, 'person', ['red', 'red', 'red'])

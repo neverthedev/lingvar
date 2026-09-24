@@ -340,6 +340,17 @@ class LearnerBlankGroupPart(StrictModel):
 LearnerFillBlanksPart = Annotated[Union[LearnerTextPart, LearnerBlankPart, LearnerBlankGroupPart], Field(discriminator="kind")]
 
 
+class LearnerRuleHint(StrictModel):
+    """Safe, immutable learner projection of a rule subtree."""
+
+    title: str
+    description: str
+    children: list["LearnerRuleHint"] = Field(default_factory=list)
+
+
+LearnerRuleHint.model_rebuild()
+
+
 class LearnerFillBlanksItem(StrictModel):
     id: str
     parts: list[LearnerFillBlanksPart]
@@ -347,6 +358,7 @@ class LearnerFillBlanksItem(StrictModel):
 
 class LearnerFillBlanksContent(StrictModel):
     items: list[LearnerFillBlanksItem]
+    rule_hints: dict[str, LearnerRuleHint] = Field(default_factory=dict)
 
 
 class LearnerExerciseBase(StrictModel):

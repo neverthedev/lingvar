@@ -72,6 +72,8 @@ export type ExerciseContent = { slug: string; title: string; description: string
 )
 
 export type AnswerState = { value: string | null; attempts_used: number; status: 'open' | 'correct' | 'exhausted'; last_check: 'correct' | 'incorrect' | null; revealed_answer?: string; revealed_answers?: string[] }
+export type RuleHint = { title: string; description: string; children: RuleHint[] }
+export type FillBlankAnswerState = AnswerState & { answer_history: string[] }
 type ExerciseSessionBase = {
   session_id: string
   expires_at: string
@@ -102,8 +104,8 @@ export type ExerciseSessionSnapshot = ExerciseSessionBase & (
   }
   | {
     type_code: 'fill_blanks'
-    content: { items: Array<{ id: string; parts: Array<{ kind: 'text'; text: string } | { kind: 'blank'; id: string; hint: string | null } | { kind: 'blank_group'; blanks: Array<{ id: string; word_count: number }> }> }> }
-    progress: { blanks: Record<string, AnswerState> }
+    content: { items: Array<{ id: string; parts: Array<{ kind: 'text'; text: string } | { kind: 'blank'; id: string; hint: string | null } | { kind: 'blank_group'; blanks: Array<{ id: string; word_count: number }> }> }>; rule_hints: Record<string, RuleHint> }
+    progress: { blanks: Record<string, FillBlankAnswerState> }
   }
 )
 export type ExerciseSessionAction =
