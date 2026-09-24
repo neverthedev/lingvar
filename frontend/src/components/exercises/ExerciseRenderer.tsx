@@ -1,8 +1,8 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { type ReactNode, useId, useRef, useState } from 'react'
 import { Button, Input } from '@/components'
-import { AnswerState, ExerciseSessionAction, ExerciseSessionSnapshot } from '@/lib/api'
+import { AnswerState, ExerciseSessionAction, ExerciseSessionSnapshot, FillBlankAnswerState, RuleHint } from '@/lib/api'
 
 type RendererProps = { exercise: ExerciseSessionSnapshot; onAction: (action: ExerciseSessionAction) => Promise<void> }
 type TypeRendererProps<T extends ExerciseSessionSnapshot['type_code']> = {
@@ -69,18 +69,131 @@ function attemptDotStates(state: AnswerState): AttemptDotState[] {
   })
 }
 
-function AttemptDots({ blankId, state }: { blankId: string; state: AnswerState }) {
+type PopoverTriggerAttributes = {
+  ariaDescribedBy: string
+  ariaControls: string
+  ariaExpanded: boolean
+}
+
+function HoverFocusPopover({
+  content,
+  children,
+}: {
+  content: ReactNode
+  children: (attributes: PopoverTriggerAttributes) => ReactNode
+}) {
+  const contentId = useId()
+  const wrapperRef = useRef<HTMLSpanElement>(null)
+  const pointerWithin = useRef(false)
+  const focusWithin = useRef(false)
+  const [open, setOpen] = useState(false)
+  const [dismissed, setDismissed] = useState(false)
+
+  const closeWhenInactive = () => {
+    if (!pointerWithin.current && !focusWithin.current) {
+      setOpen(false)
+      setDismissed(false)
+    }
+  }
+  const openOnNewEntry = () => {
+    if (dismissed) setDismissed(false)
+    setOpen(true)
+  }
+  const openFromPointer = () => {
+    if (!pointerWithin.current) {
+      pointerWithin.current = true
+      openOnNewEntry()
+    }
+  }
+  const closeAfterPointerLeaves = () => {
+    pointerWithin.current = false
+    closeWhenInactive()
+  }
+  const openFromFocus = (relatedTarget: EventTarget | null) => {
+    if (!wrapperRef.current?.contains(relatedTarget as Node | null)) {
+      focusWithin.current = true
+      openOnNewEntry()
+    }
+  }
+  const closeAfterFocusLeaves = (relatedTarget: EventTarget | null) => {
+    if (!wrapperRef.current?.contains(relatedTarget as Node | null)) {
+      focusWithin.current = false
+      closeWhenInactive()
+    }
+  }
+
+  return <span
+    ref={wrapperRef}
+    className="relative inline-flex"
+    onPointerEnter={openFromPointer}
+    onPointerLeave={closeAfterPointerLeaves}
+    onFocus={event => openFromFocus(event.relatedTarget)}
+    onBlur={event => closeAfterFocusLeaves(event.relatedTarget)}
+    onKeyDown={event => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        setDismissed(true)
+        setOpen(false)
+      }
+    }}
+  >
+    {children({ ariaDescribedBy: contentId, ariaControls: contentId, ariaExpanded: open })}
+    {open && <span
+      id={contentId}
+      role="tooltip"
+      tabIndex={-1}
+      className="absolute left-0 top-full z-20 mt-2 max-h-80 w-max max-w-[min(32rem,calc(100vw-2rem))] overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 text-sm leading-5 text-slate-800 shadow-lg"
+    >
+      {content}
+    </span>}
+  </span>
+}
+
+function RuleHintTree({ hint }: { hint: RuleHint }) {
+  return <div>
+    <p className="font-semibold text-slate-950">{hint.title}</p>
+    <p className="mt-1 whitespace-pre-wrap text-slate-700">{hint.description}</p>
+    {hint.children.length > 0 && <ul className="mt-2 space-y-2 border-l border-slate-200 pl-3">
+      {hint.children.map((child, index) => <li key={`${child.title}-${index}`}><RuleHintTree hint={child} /></li>)}
+    </ul>}
+  </div>
+}
+
+function RuleHintContent({ hints }: { hints: Array<{ blankNumber: number; hint: RuleHint }> }) {
+  if (hints.length === 1) return <RuleHintTree hint={hints[0].hint} />
+  return <div className="space-y-4">
+    {hints.map(({ blankNumber, hint }) => <section key={blankNumber}>
+      <p className="mb-2 font-semibold text-slate-950">Пропуск {blankNumber}</p>
+      <RuleHintTree hint={hint} />
+    </section>)}
+  </div>
+}
+
+function AttemptDots({ blankId, blankNumber, state }: { blankId: string; blankNumber: number; state: FillBlankAnswerState }) {
   const colors: Record<AttemptDotState, string> = {
     gray: 'bg-gray-300',
     red: 'bg-red-500',
     green: 'bg-green-500',
   }
 
-  return <span data-blank-id={blankId} className="flex shrink-0 flex-col gap-1" aria-hidden="true">
-    {attemptDotStates(state).map((dotState, index) => (
-      <span key={index} data-attempt-state={dotState} className={`h-2 w-2 rounded-full ${colors[dotState]}`} />
-    ))}
-  </span>
+  return <HoverFocusPopover content={<div className="min-w-52"><p className="font-semibold text-slate-950">История ответов</p>{state.answer_history.length > 0 ? <ol className="mt-2 list-decimal space-y-1 pl-5">{state.answer_history.map((answer, index) => <li key={index} className="whitespace-pre-wrap">{answer}</li>)}</ol> : <p className="mt-2 text-slate-700">Пока нет проверенных ответов</p>}</div>}>
+    {({ ariaDescribedBy, ariaControls, ariaExpanded }) => <button
+      type="button"
+      data-blank-id={blankId}
+      aria-label={`История ответов для пропуска ${blankNumber}`}
+      aria-describedby={ariaDescribedBy}
+      aria-controls={ariaControls}
+      aria-expanded={ariaExpanded}
+      className="flex h-11 w-8 shrink-0 flex-col items-center justify-center gap-1 rounded-md outline-none transition focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+    >
+      <span className="flex flex-col gap-1" aria-hidden="true">
+        {attemptDotStates(state).map((dotState, index) => (
+          <span key={index} data-attempt-state={dotState} className={`h-2 w-2 rounded-full ${colors[dotState]}`} />
+        ))}
+      </span>
+    </button>}
+  </HoverFocusPopover>
 }
 
 function FillBlanks({ exercise, onAction }: TypeRendererProps<'fill_blanks'>) {
@@ -88,7 +201,8 @@ function FillBlanks({ exercise, onAction }: TypeRendererProps<'fill_blanks'>) {
   const [pending, setPending] = useState<Set<string>>(() => new Set())
   const pendingRef = useRef<Set<string>>(new Set())
   const [errors, setErrors] = useState<Record<string, string>>({})
-  const progress = exercise.progress as Extract<typeof exercise.progress, { blanks: Record<string, AnswerState> }>
+  const progress = exercise.progress as Extract<typeof exercise.progress, { blanks: Record<string, FillBlankAnswerState> }>
+  const ruleHints = exercise.content.rule_hints
   const blankNumbers: Record<string, number> = {}
   let nextBlankNumber = 1
   exercise.content.items.forEach(item => item.parts.forEach(part => {
@@ -155,19 +269,27 @@ function FillBlanks({ exercise, onAction }: TypeRendererProps<'fill_blanks'>) {
                 ? 'border-red-400 bg-red-50 text-red-900 disabled:border-red-400 disabled:bg-red-50 disabled:text-red-900'
                 : 'border-gray-300 bg-white disabled:bg-gray-100'
             const statusIds = blankIds.map(blankId => `status-${blankId}`)
+            const closedRuleHints = blankIds
+              .filter(blankId => progress.blanks[blankId].status !== 'open')
+              .map(blankId => ({ blankNumber: blankNumbers[blankId], hint: ruleHints[blankId] }))
+              .filter((entry): entry is { blankNumber: number; hint: RuleHint } => Boolean(entry.hint))
+            const input = (attributes?: PopoverTriggerAttributes) => <input
+              aria-label={`Ответ для задания ${itemIndex + 1}, объединённые пропуски ${blankIds.map(blankId => blankNumbers[blankId]).join(', ')}`}
+              aria-describedby={[...statusIds, attributes?.ariaDescribedBy].filter(Boolean).join(' ')}
+              aria-controls={attributes?.ariaControls}
+              aria-expanded={attributes?.ariaExpanded}
+              className={`h-11 w-[clamp(9rem,18vw,17.5rem)] max-w-full rounded-lg border px-3 text-base leading-normal shadow-sm outline-none transition focus:border-indigo-600 focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed ${stateClass}`}
+              value={inputValue}
+              readOnly={closed}
+              disabled={blankIds.some(blankId => pending.has(blankId))}
+              onChange={event => setDrafts(current => ({ ...current, [key]: event.target.value }))}
+              onBlur={() => { if (!closed) void submitGroup(blankIds) }}
+              onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } }}
+              placeholder="Твой ответ..."
+            />
             return <span className="inline-flex max-w-full flex-wrap items-center gap-2 align-middle" key={key}>
-              <input
-                aria-label={`Ответ для задания ${itemIndex + 1}, объединённые пропуски ${blankIds.map(blankId => blankNumbers[blankId]).join(', ')}`}
-                aria-describedby={statusIds.join(' ')}
-                className={`h-11 w-[clamp(9rem,18vw,17.5rem)] max-w-full rounded-lg border px-3 text-base leading-normal shadow-sm outline-none transition focus:border-indigo-600 focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed ${stateClass}`}
-                value={inputValue}
-                disabled={closed || blankIds.some(blankId => pending.has(blankId))}
-                onChange={event => setDrafts(current => ({ ...current, [key]: event.target.value }))}
-                onBlur={() => void submitGroup(blankIds)}
-                onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } }}
-                placeholder="Твой ответ..."
-              />
-              {blankIds.map(blankId => <AttemptDots blankId={blankId} state={progress.blanks[blankId]} key={blankId} />)}
+              {closedRuleHints.length > 0 ? <HoverFocusPopover content={<RuleHintContent hints={closedRuleHints} />}>{attributes => input(attributes)}</HoverFocusPopover> : input()}
+              {blankIds.map(blankId => <AttemptDots blankId={blankId} blankNumber={blankNumbers[blankId]} state={progress.blanks[blankId]} key={blankId} />)}
               {blankIds.map(blankId => <span id={`status-${blankId}`} className="sr-only" aria-live="polite" key={`status-${blankId}`}>{statusText(progress.blanks[blankId], blankId)}</span>)}
             </span>
           }
@@ -180,26 +302,29 @@ function FillBlanks({ exercise, onAction }: TypeRendererProps<'fill_blanks'>) {
             : (closed ? (state.value ?? '') : inputValue)
           const hintId = `hint-${part.id}`
           const statusId = `status-${part.id}`
-          const describedBy = [part.hint ? hintId : null, statusId].filter(Boolean).join(' ')
           const stateClass = state.status === 'correct'
             ? 'border-green-400 bg-green-50 text-green-900 disabled:border-green-400 disabled:bg-green-50 disabled:text-green-900'
             : state.status === 'exhausted'
               ? 'border-red-400 bg-red-50 text-red-900 disabled:border-red-400 disabled:bg-red-50 disabled:text-red-900'
               : 'border-gray-300 bg-white disabled:bg-gray-100'
 
-          return <span className="inline-flex max-w-full items-center gap-2 whitespace-nowrap align-middle" key={part.id}>
-            <input
+          const input = (attributes?: PopoverTriggerAttributes) => <input
               aria-label={`Ответ для задания ${itemIndex + 1}`}
-              aria-describedby={describedBy}
+              aria-describedby={[part.hint ? hintId : null, statusId, attributes?.ariaDescribedBy].filter(Boolean).join(' ')}
+              aria-controls={attributes?.ariaControls}
+              aria-expanded={attributes?.ariaExpanded}
               className={`h-11 w-[clamp(9rem,18vw,17.5rem)] max-w-full rounded-lg border px-3 text-base leading-normal shadow-sm outline-none transition focus:border-indigo-600 focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed ${stateClass}`}
               value={displayedValue}
-              disabled={closed || pending.has(part.id)}
+              readOnly={closed}
+              disabled={pending.has(part.id)}
               onChange={event => setDrafts(current => ({ ...current, [part.id]: event.target.value }))}
-              onBlur={() => void submit(part.id)}
+              onBlur={() => { if (!closed) void submit(part.id) }}
               onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } }}
               placeholder="Твой ответ..."
             />
-            <AttemptDots blankId={part.id} state={state} />
+          return <span className="inline-flex max-w-full items-center gap-2 whitespace-nowrap align-middle" key={part.id}>
+            {closed && ruleHints[part.id] ? <HoverFocusPopover content={<RuleHintContent hints={[{ blankNumber: blankNumbers[part.id], hint: ruleHints[part.id] }]} />}>{attributes => input(attributes)}</HoverFocusPopover> : input()}
+            <AttemptDots blankId={part.id} blankNumber={blankNumbers[part.id]} state={state} />
             {part.hint && <span id={hintId} className="text-base italic leading-6 text-slate-500">({part.hint})</span>}
             <span id={statusId} className="sr-only" aria-live="polite">{statusText(state, part.id)}</span>
           </span>

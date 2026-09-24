@@ -11,6 +11,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import base64
 import secrets
+from collections import defaultdict
 from typing import Any, Callable
 
 from fastapi import HTTPException
@@ -366,8 +367,55 @@ def _metadata(exercise: Exercise) -> dict[str, Any]:
     }
 
 
-def _blank_state() -> dict[str, Any]:
-    return {"value": None, "attempts_used": 0, "status": "open", "last_check": None}
+def _blank_state(*, answer_history: bool = False) -> dict[str, Any]:
+    state = {"value": None, "attempts_used": 0, "status": "open", "last_check": None}
+    if answer_history:
+        state["answer_history"] = []
+    return state
+
+
+def _rule_sort_key(rule: Rule) -> tuple[bool, int, str, int]:
+    """Match the stable learner/admin tree order without exposing rule IDs."""
+    return (
+        rule.ordering is None,
+        rule.ordering if rule.ordering is not None else 0,
+        rule.title,
+        rule.id,
+    )
+
+
+def _fill_blanks_rule_hints(db: Session, definition: FillBlanksDefinition, exercise_rule_id: int) -> dict[str, dict[str, Any]]:
+    """Freeze the learner-safe rule subtree for every blank in a session."""
+    rules = db.query(Rule).all()
+    by_id = {rule.id: rule for rule in rules}
+    children_by_parent: dict[int, list[Rule]] = defaultdict(list)
+    for rule in rules:
+        if rule.parent_rule_id in by_id:
+            children_by_parent[rule.parent_rule_id].append(rule)
+
+    def snapshot(rule_id: int, ancestors: frozenset[int] = frozenset()) -> dict[str, Any]:
+        rule = by_id.get(rule_id)
+        if rule is None:
+            # An exercise with a broken legacy rule reference cannot provide a
+            # truthful learner snapshot; do not silently omit the hint.
+            raise HTTPException(status_code=409, detail="Правило упражнения недоступно")
+        lineage = ancestors | {rule_id}
+        return {
+            "title": rule.title,
+            "description": rule.description,
+            "children": [
+                snapshot(child.id, lineage)
+                for child in sorted(children_by_parent[rule_id], key=_rule_sort_key)
+                if child.id not in lineage
+            ],
+        }
+
+    return {
+        part.id: snapshot(part.rule_id if part.rule_id is not None else exercise_rule_id)
+        for item in definition.items
+        for part in item.parts
+        if isinstance(part, BlankPart)
+    }
 
 
 def _session_state(db: Session, exercise: Exercise, user_id: int) -> dict[str, Any]:
@@ -401,13 +449,16 @@ def _session_state(db: Session, exercise: Exercise, user_id: int) -> dict[str, A
         state["progress"] = {"items": {str(item["id"]): {"revealed": False, "result": None} for item in items}}
     elif exercise.type_code == "fill_blanks":
         definition = FillBlanksDefinition.model_validate(exercise.definition)
-        state["content"] = raw_content
+        state["content"] = {
+            **raw_content,
+            "rule_hints": _fill_blanks_rule_hints(db, definition, exercise.rule_id),
+        }
         state["answers"] = {
             part.id: part.accepted_answers
             for item in definition.items for part in item.parts if isinstance(part, BlankPart)
         }
         state["progress"] = {"blanks": {
-            part_id: _blank_state() for part_id in state["answers"]
+            part_id: _blank_state(answer_history=True) for part_id in state["answers"]
         }}
     else:
         raise _validation_error(["type_code"], "Серверная сессия недоступна для этого типа упражнения")
@@ -625,6 +676,7 @@ def _fill_check(session: ExerciseSession, action: dict[str, Any]) -> bool:
     if not _require_open_check(blank, action["expected_attempts_used"]):
         return False
     _check_answer(blank, action["answer"], answers)
+    blank["answer_history"].append(action["answer"])
     return True
 
 
@@ -655,6 +707,8 @@ def _fill_group_check(session: ExerciseSession, action: dict[str, Any]) -> bool:
         blank = blanks[blank_id]
         if blank["status"] == "open":
             _check_answer(blank, fragment, session.state["answers"][blank_id], allow_empty=True)
+            if fragment:
+                blank["answer_history"].append(fragment)
             changed = True
     return changed
 

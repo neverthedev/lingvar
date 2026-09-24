@@ -344,7 +344,10 @@ def test_blank_groups_split_answers_and_preserve_independent_state(test_engine, 
         assert first.status_code == 200, first.text
         assert first.json()["revision"] == 2
         assert first.json()["progress"]["blanks"]["color"]["attempts_used"] == 1
-        assert first.json()["progress"]["blanks"]["person"] == {"value": "kolega", "attempts_used": 1, "status": "open", "last_check": "incorrect"}
+        assert first.json()["progress"]["blanks"]["person"] == {
+            "value": "kolega", "attempts_used": 1, "status": "open", "last_check": "incorrect",
+            "answer_history": ["kolega"],
+        }
         corrected = client.post(partial_url, headers=student, json={
             "action": "fill_blank_group_check", "blank_ids": ["color", "person"],
             "answer": "zielony kolega Mateusz лишнее", "expected_attempts_used": {"color": 1, "person": 1},
@@ -359,6 +362,231 @@ def test_blank_groups_split_answers_and_preserve_independent_state(test_engine, 
         })
         assert stale.status_code == 200, stale.text
         assert stale.json()["revision"] == 3
+
+
+def test_fill_blank_rule_snapshots_and_answer_history_survive_restore_and_restart(test_engine, test_database_url):
+    """Rule trees and checked values are immutable per session and safe to restore."""
+    upgrade_schema(test_database_url)
+    from main import app
+
+    with TestClient(app) as client:
+        admin = _admin_headers(client, test_database_url)
+
+        def create_rule(title: str, parent_rule_id: int | None = None) -> dict:
+            response = client.post("/admin/rules", headers=admin, json={
+                "title": title, "description": f"Описание {title}", "parent_rule_id": parent_rule_id,
+            })
+            assert response.status_code == 201, response.text
+            return response.json()
+
+        root = create_rule("Корень снимка QA")
+        mapped = create_rule("Явное правило снимка QA", root["id"])
+        mapped_first = create_rule("Первый подпункт снимка QA", mapped["id"])
+        mapped_deep = create_rule("Глубокий подпункт снимка QA", mapped_first["id"])
+        mapped_second = create_rule("Второй подпункт снимка QA", mapped["id"])
+        inherited_child = create_rule("Наследуемый подпункт снимка QA", root["id"])
+        definition = {"items": [
+            {"id": "single-blanks", "parts": [
+                {"kind": "text", "text": "Mam "},
+                {"kind": "blank", "id": "explicit", "hint": "kot", "rule_id": mapped["id"], "accepted_answers": ["kota"]},
+                {"kind": "text", "text": " i "},
+                {"kind": "blank", "id": "inherited", "hint": "pies", "accepted_answers": ["psa"]},
+            ]},
+            {"id": "grouped-blanks", "parts": [
+                {"kind": "text", "text": "Widzę "},
+                {"kind": "blank", "id": "color", "hint": None, "rule_id": mapped_first["id"], "accepted_answers": ["zielony"]},
+                {"kind": "blank", "id": "person", "hint": None, "rule_id": mapped_second["id"], "accepted_answers": ["kolega Mateusz"]},
+                {"kind": "text", "text": "."},
+            ]},
+        ]}
+        created = client.post("/admin/exercises", headers=admin, json=_exercise_payload(
+            "fill_blanks", definition, slug="qa-rule-hints-history", status="published", rule_id=root["id"],
+        ))
+        assert created.status_code == 201, created.text
+        student = _student_headers(client, "rule-hints-history-student-qa")
+        created_session = client.post("/api/exercises/qa-rule-hints-history/sessions", headers=student)
+        assert created_session.status_code == 201, created_session.text
+        snapshot = created_session.json()
+        session_id = snapshot["session_id"]
+        expected_hints = {
+            "explicit": {
+                "title": mapped["title"], "description": mapped["description"],
+                "children": [
+                    {
+                        "title": mapped_first["title"], "description": mapped_first["description"],
+                        "children": [{"title": mapped_deep["title"], "description": mapped_deep["description"], "children": []}],
+                    },
+                    {"title": mapped_second["title"], "description": mapped_second["description"], "children": []},
+                ],
+            },
+            "inherited": {
+                "title": root["title"], "description": root["description"],
+                "children": [
+                    {
+                        "title": mapped["title"], "description": mapped["description"],
+                        "children": [
+                            {
+                                "title": mapped_first["title"], "description": mapped_first["description"],
+                                "children": [{"title": mapped_deep["title"], "description": mapped_deep["description"], "children": []}],
+                            },
+                            {"title": mapped_second["title"], "description": mapped_second["description"], "children": []},
+                        ],
+                    },
+                    {"title": inherited_child["title"], "description": inherited_child["description"], "children": []},
+                ],
+            },
+        }
+        assert snapshot["content"]["rule_hints"] == {
+            **expected_hints,
+            "color": expected_hints["explicit"]["children"][0],
+            "person": expected_hints["explicit"]["children"][1],
+        }
+        assert set(snapshot["content"]["rule_hints"]) == {"explicit", "inherited", "color", "person"}
+        assert "accepted_answers" not in str(snapshot)
+        assert "rule_id" not in str(snapshot["content"])
+        assert "answers" not in snapshot
+        assert all(blank["answer_history"] == [] for blank in snapshot["progress"]["blanks"].values())
+
+        action_url = f"/api/exercises/qa-rule-hints-history/sessions/{session_id}/actions"
+        wrong = client.post(action_url, headers=student, json={
+            "action": "fill_blank_check", "blank_id": "explicit", "answer": " wrong ", "expected_attempts_used": 0,
+        })
+        assert wrong.status_code == 200, wrong.text
+        assert wrong.json()["progress"]["blanks"]["explicit"]["answer_history"] == [" wrong "]
+        stale = client.post(action_url, headers=student, json={
+            "action": "fill_blank_check", "blank_id": "explicit", "answer": "stale duplicate", "expected_attempts_used": 0,
+        })
+        assert stale.status_code == 200, stale.text
+        assert stale.json()["revision"] == wrong.json()["revision"] == 2
+        assert stale.json()["progress"]["blanks"]["explicit"]["answer_history"] == [" wrong "]
+        correct = client.post(action_url, headers=student, json={
+            "action": "fill_blank_check", "blank_id": "explicit", "answer": " KOTA ", "expected_attempts_used": 1,
+        })
+        assert correct.status_code == 200, correct.text
+        assert correct.json()["progress"]["blanks"]["explicit"]["answer_history"] == [" wrong ", " KOTA "]
+        assert correct.json()["progress"]["blanks"]["explicit"]["status"] == "correct"
+
+        empty = client.post(action_url, headers=student, json={
+            "action": "fill_blank_check", "blank_id": "inherited", "answer": "", "expected_attempts_used": 0,
+        })
+        assert empty.status_code == 422, empty.text
+        invalid_blank = client.post(action_url, headers=student, json={
+            "action": "fill_blank_check", "blank_id": "missing", "answer": "server error", "expected_attempts_used": 0,
+        })
+        assert invalid_blank.status_code == 409, invalid_blank.text
+        unchanged = client.get(f"/api/exercises/qa-rule-hints-history/sessions/{session_id}", headers=student).json()
+        assert unchanged["revision"] == correct.json()["revision"]
+        assert unchanged["progress"]["blanks"]["inherited"]["answer_history"] == []
+        assert unchanged["progress"]["blanks"]["explicit"]["answer_history"] == [" wrong ", " KOTA "]
+
+        rollback_session = client.post("/api/exercises/qa-rule-hints-history/sessions", headers=student).json()
+        rollback_url = f"/api/exercises/qa-rule-hints-history/sessions/{rollback_session['session_id']}/actions"
+        with test_engine.begin() as connection:
+            connection.execute(text("""
+                CREATE FUNCTION qa_fail_session_update() RETURNS trigger
+                LANGUAGE plpgsql AS $$
+                BEGIN
+                    RAISE EXCEPTION 'forced QA rollback';
+                END;
+                $$
+            """))
+            connection.execute(text("""
+                CREATE TRIGGER qa_fail_session_update_trigger
+                BEFORE UPDATE OF state ON exercise_sessions
+                FOR EACH ROW EXECUTE FUNCTION qa_fail_session_update()
+            """))
+        try:
+            with TestClient(app, raise_server_exceptions=False) as failing_client:
+                failed = failing_client.post(rollback_url, headers=student, json={
+                    "action": "fill_blank_check", "blank_id": "explicit", "answer": "server failure",
+                    "expected_attempts_used": 0,
+                })
+            assert failed.status_code == 500, failed.text
+        finally:
+            with test_engine.begin() as connection:
+                connection.execute(text("DROP TRIGGER qa_fail_session_update_trigger ON exercise_sessions"))
+                connection.execute(text("DROP FUNCTION qa_fail_session_update()"))
+        rollback_state = client.get(f"/api/exercises/qa-rule-hints-history/sessions/{rollback_session['session_id']}", headers=student)
+        assert rollback_state.status_code == 200, rollback_state.text
+        assert rollback_state.json()["revision"] == 1
+        assert rollback_state.json()["progress"]["blanks"]["explicit"]["answer_history"] == []
+
+        group = client.post(action_url, headers=student, json={
+            "action": "fill_blank_group_check", "blank_ids": ["color", "person"], "answer": "zielony",
+            "expected_attempts_used": {"color": 0, "person": 0},
+        })
+        assert group.status_code == 200, group.text
+        group_progress = group.json()["progress"]["blanks"]
+        assert group_progress["color"]["answer_history"] == ["zielony"]
+        assert group_progress["person"]["value"] == ""
+        assert group_progress["person"]["answer_history"] == []
+        group_completed = client.post(action_url, headers=student, json={
+            "action": "fill_blank_group_check", "blank_ids": ["color", "person"],
+            "answer": "zielony kolega Mateusz", "expected_attempts_used": {"color": 1, "person": 1},
+        })
+        assert group_completed.status_code == 200, group_completed.text
+        group_progress = group_completed.json()["progress"]["blanks"]
+        assert group_progress["color"]["answer_history"] == ["zielony"]
+        assert group_progress["person"]["answer_history"] == ["kolega Mateusz"]
+        group_stale = client.post(action_url, headers=student, json={
+            "action": "fill_blank_group_check", "blank_ids": ["color", "person"],
+            "answer": "duplicate stale", "expected_attempts_used": {"color": 0, "person": 0},
+        })
+        assert group_stale.status_code == 200, group_stale.text
+        assert group_stale.json()["revision"] == group_completed.json()["revision"]
+        assert group_stale.json()["progress"] == group_completed.json()["progress"]
+        original_content = snapshot["content"]
+
+        root_update = client.put(f"/admin/rules/{root['id']}", headers=admin, json={
+            "title": "Корень снимка QA изменён", "description": "Новое описание корня", "parent_rule_id": None,
+        })
+        assert root_update.status_code == 200, root_update.text
+        mapped_update = client.put(f"/admin/rules/{mapped['id']}", headers=admin, json={
+            "title": "Явное правило снимка QA изменено", "description": "Новое описание явного правила",
+            "parent_rule_id": root["id"],
+        })
+        assert mapped_update.status_code == 200, mapped_update.text
+        create_rule("Новый подпункт после сессии QA", mapped["id"])
+
+    # A fresh TestClient models an application restart while the PostgreSQL session remains.
+    with TestClient(app) as restored_client:
+        old = restored_client.get(f"/api/exercises/qa-rule-hints-history/sessions/{session_id}", headers=student)
+        assert old.status_code == 200, old.text
+        old_payload = old.json()
+        assert old_payload["content"] == original_content
+        assert old_payload["progress"]["blanks"]["explicit"]["answer_history"] == [" wrong ", " KOTA "]
+        assert old_payload["progress"]["blanks"]["person"]["answer_history"] == ["kolega Mateusz"]
+        stale_after_edit = restored_client.post(
+            f"/api/exercises/qa-rule-hints-history/sessions/{session_id}/actions", headers=student, json={
+                "action": "fill_blank_group_check", "blank_ids": ["color", "person"],
+                "answer": "stale after edit", "expected_attempts_used": {"color": 1, "person": 1},
+            },
+        )
+        assert stale_after_edit.status_code == 200, stale_after_edit.text
+        assert stale_after_edit.json()["content"] == original_content
+        assert stale_after_edit.json()["progress"] == old_payload["progress"]
+
+        fresh = restored_client.post("/api/exercises/qa-rule-hints-history/sessions", headers=student)
+        assert fresh.status_code == 201, fresh.text
+        fresh_payload = fresh.json()
+        fresh_hints = fresh_payload["content"]["rule_hints"]
+        assert fresh_hints["inherited"]["title"] == "Корень снимка QA изменён"
+        assert fresh_hints["explicit"]["title"] == "Явное правило снимка QA изменено"
+        assert [child["title"] for child in fresh_hints["explicit"]["children"]] == [
+            "Первый подпункт снимка QA", "Второй подпункт снимка QA", "Новый подпункт после сессии QA",
+        ]
+
+        restarted = restored_client.post(
+            f"/api/exercises/qa-rule-hints-history/sessions/{session_id}/restart", headers=student,
+        )
+        assert restarted.status_code == 200, restarted.text
+        restarted_payload = restarted.json()
+        assert restarted_payload["session_id"] != session_id
+        assert restarted_payload["content"] == fresh_payload["content"]
+        assert all(blank["answer_history"] == [] for blank in restarted_payload["progress"]["blanks"].values())
+        assert restored_client.get(
+            f"/api/exercises/qa-rule-hints-history/sessions/{session_id}", headers=student,
+        ).status_code == 404
 
 
 def test_legacy_exercise_endpoints_keep_their_original_flat_payloads_via_shared_sources(test_engine, test_database_url):
@@ -512,7 +740,10 @@ def test_public_sessions_restore_all_types_and_keep_a_fixed_ttl(test_engine, tes
         assert client.put(f"/admin/exercises/{exercise_ids['fill']}", headers=admin, json=replacement).status_code == 200
         fill_checked = client.post(f"/api/exercises/qa-session-fill/sessions/{fill_id}/actions", headers=student, json={"action": "fill_blank_check", "blank_id": "blank-cat", "answer": "KOTA", "expected_attempts_used": 0})
         assert fill_checked.status_code == 200
-        assert fill_checked.json()["progress"]["blanks"]["blank-cat"] == {"value": "KOTA", "attempts_used": 1, "status": "correct", "last_check": "correct"}
+        assert fill_checked.json()["progress"]["blanks"]["blank-cat"] == {
+            "value": "KOTA", "attempts_used": 1, "status": "correct", "last_check": "correct",
+            "answer_history": ["KOTA"],
+        }
         assert client.post(f"/api/exercises/qa-session-fill/sessions/{fill_id}/actions", headers=student, json={"action": "self_check_reveal", "item_id": noun_id}).status_code == 409
 
         with test_engine.connect() as connection:
@@ -553,7 +784,10 @@ def test_restart_replaces_the_session_without_leaking_progress(test_engine, test
         replacement = fresh.json()
         assert replacement["session_id"] != original_id
         assert replacement["revision"] == 1
-        assert replacement["progress"]["blanks"]["blank-cat"] == {"value": None, "attempts_used": 0, "status": "open", "last_check": None}
+        assert replacement["progress"]["blanks"]["blank-cat"] == {
+            "value": None, "attempts_used": 0, "status": "open", "last_check": None,
+            "answer_history": [],
+        }
         assert client.get(f"/api/exercises/qa-restart/sessions/{original_id}", headers=student).status_code == 404
         with test_engine.connect() as connection:
             assert connection.execute(text("SELECT count(*) FROM exercise_sessions WHERE public_id = :id"), {"id": original_id}).scalar_one() == 0
