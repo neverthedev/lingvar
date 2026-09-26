@@ -81,10 +81,17 @@ async function signIn(page: Page, username: string, password: string) {
   await expect(page).toHaveURL(/\/$/)
 }
 
-async function createFillExercise() {
-  const adminUsername = 'browser-session-admin-qa'
+async function createFillExercise(suffix = '') {
+  const exerciseSlug = suffix ? `browser-rule-page-${suffix}` : 'browser-session-fill-qa'
+  const otherExerciseSlug = suffix ? `${exerciseSlug}-other` : 'browser-session-fill-other-qa'
+  const adminUsername = suffix ? `browser-rule-page-admin-${suffix}` : 'browser-session-admin-qa'
   const adminPassword = 'safe-browser-session-password-8'
-  await createAdmin(adminUsername, 'browser-session-admin-qa@example.com', adminPassword)
+  const ruleTitleSuffix = suffix ? ` ${suffix}` : ''
+  const explicitRuleTitle = `Явное правило browser QA${ruleTitleSuffix}`
+  const explicitChildTitle = `Подправило browser QA${ruleTitleSuffix}`
+  const explicitGrandchildTitle = `Глубокое подправило browser QA${ruleTitleSuffix}`
+  const siblingRuleTitle = `Соседнее подправило browser QA${ruleTitleSuffix}`
+  await createAdmin(adminUsername, `${adminUsername}@example.com`, adminPassword)
   const api = await request.newContext({ baseURL: backendUrl })
   const login = await api.post('/users/token', { form: { username: adminUsername, password: adminPassword } })
   expect(login.status()).toBe(200)
@@ -93,27 +100,27 @@ async function createFillExercise() {
   expect(rules.status()).toBe(200)
   const ruleId = (await rules.json() as Array<{ id: number }>)[0].id
   const explicitRuleResponse = await api.post('/admin/rules', { headers, data: {
-    title: 'Явное правило browser QA', description: 'Описание явного правила browser QA', parent_rule_id: ruleId,
+    title: explicitRuleTitle, description: `Описание ${explicitRuleTitle}`, parent_rule_id: ruleId,
   } })
   expect(explicitRuleResponse.status()).toBe(201)
   const explicitRule = await explicitRuleResponse.json() as { id: number }
   const explicitChildResponse = await api.post('/admin/rules', { headers, data: {
-    title: 'Подправило browser QA', description: 'Описание подправила browser QA', parent_rule_id: explicitRule.id,
+    title: explicitChildTitle, description: `Описание ${explicitChildTitle}`, parent_rule_id: explicitRule.id,
   } })
   expect(explicitChildResponse.status()).toBe(201)
   const explicitChild = await explicitChildResponse.json() as { id: number }
   const explicitGrandchildResponse = await api.post('/admin/rules', { headers, data: {
-    title: 'Глубокое подправило browser QA', description: 'Описание глубокого подправила browser QA', parent_rule_id: explicitChild.id,
+    title: explicitGrandchildTitle, description: `Описание ${explicitGrandchildTitle}`, parent_rule_id: explicitChild.id,
   } })
   expect(explicitGrandchildResponse.status()).toBe(201)
   const siblingRuleResponse = await api.post('/admin/rules', { headers, data: {
-    title: 'Соседнее подправило browser QA', description: 'Описание соседнего подправила browser QA', parent_rule_id: explicitRule.id,
+    title: siblingRuleTitle, description: `Описание ${siblingRuleTitle}`, parent_rule_id: explicitRule.id,
   } })
   expect(siblingRuleResponse.status()).toBe(201)
   const created = await api.post('/admin/exercises', {
     headers,
     data: {
-      slug: 'browser-session-fill-qa', type_code: 'fill_blanks', schema_version: 1,
+      slug: exerciseSlug, type_code: 'fill_blanks', schema_version: 1,
       title: 'Browser session fill blanks', description: 'Session browser coverage', instruction: 'Заполните пропуски',
       difficulty: 'beginner', estimated_duration_minutes: 5, display_order: 90, status: 'published', rule_id: ruleId,
       definition: { items: [{ id: 'sentence-1', parts: [
@@ -131,14 +138,25 @@ async function createFillExercise() {
   const other = await api.post('/admin/exercises', {
     headers,
     data: {
-      slug: 'browser-session-fill-other-qa', type_code: 'fill_blanks', schema_version: 1,
+      slug: otherExerciseSlug, type_code: 'fill_blanks', schema_version: 1,
       title: 'Other browser session exercise', description: 'Used to reject a session from another exercise', instruction: 'Заполните пропуск',
       difficulty: 'beginner', estimated_duration_minutes: 5, display_order: 91, status: 'published', rule_id: ruleId,
       definition: { items: [{ id: 'other-sentence', parts: [{ kind: 'text', text: 'Mam ' }, { kind: 'blank', id: 'other', hint: 'kot', accepted_answers: ['kota'] }] }] },
     },
   })
   expect(other.status()).toBe(201)
-  return { api }
+  return {
+    api,
+    exerciseSlug,
+    adminUsername,
+    adminPassword,
+    rootRuleId: ruleId,
+    explicitRuleId: explicitRule.id,
+    explicitRuleTitle,
+    explicitGrandchildTitle,
+    explicitChildId: explicitChild.id,
+    explicitGrandchildId: (await explicitGrandchildResponse.json() as { id: number }).id,
+  }
 }
 
 test('exercise URLs restore one server session for every supported type', async ({ browser }) => {
@@ -267,7 +285,7 @@ test('fill blanks submits on blur or Enter, restores server state, and restarts 
   await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '1')
 
   await cat.focus()
-  const catRuleTooltip = page.getByRole('tooltip')
+  const catRuleTooltip = page.getByRole('dialog')
   await expect(catRuleTooltip).toContainText('Явное правило browser QA')
   await expect(catRuleTooltip).toContainText('Подправило browser QA')
   await expect(catRuleTooltip).toContainText('Глубокое подправило browser QA')
@@ -277,16 +295,15 @@ test('fill blanks submits on blur or Enter, restores server state, and restarts 
   expect(catRuleText.indexOf('Подправило browser QA')).toBeLessThan(catRuleText.indexOf('Глубокое подправило browser QA'))
   await cat.press('Escape')
   await expect(cat).toBeFocused()
-  await expect(page.getByRole('tooltip')).toHaveCount(0)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 
   const catHistory = page.getByRole('button', { name: 'История ответов для пропуска 1' })
   await catHistory.focus()
   await expect(catHistory).toHaveAttribute('aria-expanded', 'true')
   const catHistoryId = await catHistory.getAttribute('aria-controls')
   expect(catHistoryId).toBeTruthy()
-  await expect(catHistory).toHaveAttribute('aria-describedby', new RegExp(catHistoryId!))
   await expect(catHistory).toHaveClass(/focus-visible:ring-2/)
-  const catHistoryTooltip = page.getByRole('tooltip')
+  const catHistoryTooltip = page.getByRole('dialog')
   await expect(catHistoryTooltip).toContainText('История ответов')
   await expect(catHistoryTooltip.locator('ol li')).toHaveText(['wrong', 'still-wrong', 'KOTA'])
   await catHistory.hover()
@@ -310,7 +327,7 @@ test('fill blanks submits on blur or Enter, restores server state, and restarts 
   await expect(catHistoryTooltip).toBeVisible()
   await catHistory.press('Escape')
   await expect(catHistory).toBeFocused()
-  await expect(page.getByRole('tooltip')).toHaveCount(0)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 
   const dogResponse = page.waitForResponse(response => response.url().includes(`/sessions/${originalId}/actions`) && response.request().method() === 'POST')
   await dog.fill('PSA')
@@ -324,8 +341,8 @@ test('fill blanks submits on blur or Enter, restores server state, and restarts 
   await expectAttemptDots(page, 'dog', ['green', 'gray', 'gray'])
   await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '2')
   await dog.focus()
-  await expect(page.getByRole('tooltip')).toContainText('Правила польского языка')
-  await expect(page.getByRole('tooltip')).toContainText('Явное правило browser QA')
+  await expect(page.getByRole('dialog')).toContainText('Правила польского языка')
+  await expect(page.getByRole('dialog')).toContainText('Явное правило browser QA')
   await dog.press('Escape')
   await expect(dog).toBeFocused()
 
@@ -338,7 +355,7 @@ test('fill blanks submits on blur or Enter, restores server state, and restarts 
   await expect(page.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '2')
   const birdHistory = page.getByRole('button', { name: 'История ответов для пропуска 3' })
   await birdHistory.focus()
-  await expect(page.getByRole('tooltip')).toContainText('Пока нет проверенных ответов')
+  await expect(page.getByRole('dialog')).toContainText('Пока нет проверенных ответов')
   await birdHistory.press('Escape')
   await page.unroute('**/api/exercises/browser-session-fill-qa/sessions/*/actions')
 
@@ -368,7 +385,7 @@ test('fill blanks submits on blur or Enter, restores server state, and restarts 
   await expect(page.locator('#status-cat')).toHaveText('Верно · 3 из 3')
   await expect(page.locator('#status-bird')).toHaveText('Попытки закончились. Ответ: ptaka')
   await page.getByRole('button', { name: 'История ответов для пропуска 1' }).focus()
-  await expect(page.getByRole('tooltip').locator('ol li')).toHaveText(['wrong', 'still-wrong', 'KOTA'])
+  await expect(page.getByRole('dialog').locator('ol li')).toHaveText(['wrong', 'still-wrong', 'KOTA'])
   await page.getByRole('button', { name: 'История ответов для пропуска 1' }).press('Escape')
 
   const restartResponse = page.waitForResponse(response => response.url().includes(`/sessions/${originalId}/restart`) && response.request().method() === 'POST')
@@ -382,7 +399,7 @@ test('fill blanks submits on blur or Enter, restores server state, and restarts 
   await expect(page.getByRole('textbox', { name: 'Ответ для задания 1' }).first()).not.toHaveAttribute('readonly', '')
   await expectAttemptDots(page, 'cat', ['gray', 'gray', 'gray'])
   await page.getByRole('button', { name: 'История ответов для пропуска 1' }).focus()
-  await expect(page.getByRole('tooltip')).toContainText('Пока нет проверенных ответов')
+  await expect(page.getByRole('dialog')).toContainText('Пока нет проверенных ответов')
   await page.getByRole('button', { name: 'История ответов для пропуска 1' }).press('Escape')
 
   await page.goto(`/exercises/browser-session-fill-qa?session_id=missing-session`)
@@ -479,7 +496,7 @@ test('catalog groups rules and a grouped blank input keeps partial progress inde
   expect(root.status()).toBe(201)
   const ruleId = (await root.json() as { id: number }).id
   const colorRule = await api.post('/admin/rules', { headers, data: {
-    title: 'Правило цвета UI', description: 'Описание правила цвета UI', parent_rule_id: ruleId,
+    title: 'Правило цвета UI', description: '<p>Оченьдлинныйтекстправилакоторыйдолженпереноситьсявнутриузкогополяипрочитыватьсяцеликом.</p><ul><li>Длинный элемент списка тоже должен переноситься</li><li>ЭлементСпискаОченьДлинныйБезПробеловДляПроверкиПереноса</li></ul><table><tbody><tr><td>ТаблицаОченьДлинноеЗначениеБезПробеловДляГоризонтальнойПрокрутки</td><td>ЕщёОдноОченьДлинноеЗначениеБезПробелов</td></tr></tbody></table>', parent_rule_id: ruleId,
   } })
   expect(colorRule.status()).toBe(201)
   const colorRuleId = (await colorRule.json() as { id: number }).id
@@ -488,7 +505,7 @@ test('catalog groups rules and a grouped blank input keeps partial progress inde
   } })
   expect(colorChild.status()).toBe(201)
   const personRule = await api.post('/admin/rules', { headers, data: {
-    title: 'Правило лица UI', description: 'Описание правила лица UI', parent_rule_id: ruleId,
+    title: 'Правило лица UI', description: '<p>Описание правила лица UI</p>', parent_rule_id: ruleId,
   } })
   expect(personRule.status()).toBe(201)
   const personRuleId = (await personRule.json() as { id: number }).id
@@ -499,8 +516,16 @@ test('catalog groups rules and a grouped blank input keeps partial progress inde
     definition: { items: [{ id: 'sentence', parts: [
       { kind: 'text', text: 'To ' },
       { kind: 'blank', id: 'color', hint: null, rule_id: colorRuleId, accepted_answers: ['zielony'] },
-      { kind: 'blank', id: 'person', hint: null, rule_id: personRuleId, accepted_answers: ['kolega Mateusz'] },
+      { kind: 'blank', id: 'person', hint: 'подсказка общего поля', rule_id: personRuleId, accepted_answers: ['kolega Mateusz'] },
       { kind: 'text', text: '.' },
+    ] }, { id: 'boundaries', parts: [
+      { kind: 'blank', id: 'early-hint', hint: 'ранняя подсказка', rule_id: colorRuleId, accepted_answers: ['trzeci'] },
+      { kind: 'blank', id: 'after-early', hint: null, rule_id: personRuleId, accepted_answers: ['czwarty'] },
+      { kind: 'blank', id: 'after-early-last', hint: null, rule_id: colorRuleId, accepted_answers: ['piąty'] },
+      { kind: 'text', text: '; ' },
+      { kind: 'blank', id: 'text-first', hint: null, rule_id: colorRuleId, accepted_answers: ['szósty'] },
+      { kind: 'text', text: ', ' },
+      { kind: 'blank', id: 'text-last', hint: null, rule_id: personRuleId, accepted_answers: ['siódmy'] },
     ] }] },
   } })
   expect(created.status()).toBe(201)
@@ -512,6 +537,22 @@ test('catalog groups rules and a grouped blank input keeps partial progress inde
   const learnerLogin = await api.post('/users/token', { form: { username: learnerUsername, password: learnerPassword } })
   expect(learnerLogin.status()).toBe(200)
   const learnerHeaders = { Authorization: `Bearer ${(await learnerLogin.json()).access_token}` }
+  const serialized = await api.post('/api/exercises/browser-grouped-blanks-qa/sessions', { headers: learnerHeaders })
+  expect(serialized.status()).toBe(201)
+  const serializedParts = (await serialized.json() as { content: { items: Array<{ id: string; parts: unknown[] }> } }).content.items
+  expect(serializedParts[0].parts).toEqual([
+    { kind: 'text', text: 'To ' },
+    { kind: 'blank_group', blanks: [{ id: 'color', word_count: 1 }, { id: 'person', word_count: 2 }], hint: 'подсказка общего поля' },
+    { kind: 'text', text: '.' },
+  ])
+  expect(serializedParts[1].parts).toEqual([
+    { kind: 'blank', id: 'early-hint', hint: 'ранняя подсказка' },
+    { kind: 'blank_group', blanks: [{ id: 'after-early', word_count: 1 }, { id: 'after-early-last', word_count: 1 }] },
+    { kind: 'text', text: '; ' },
+    { kind: 'blank', id: 'text-first', hint: null },
+    { kind: 'text', text: ', ' },
+    { kind: 'blank', id: 'text-last', hint: null },
+  ])
 
   const context = await browser.newContext()
   const page = await context.newPage()
@@ -535,8 +576,7 @@ test('catalog groups rules and a grouped blank input keeps partial progress inde
   await expectAttemptDots(page, 'person', ['red', 'gray', 'gray'])
   await expect(grouped).toBeEnabled()
   await grouped.focus()
-  const firstGroupedHint = page.getByRole('tooltip')
-  await expect(firstGroupedHint).toContainText('Пропуск 1')
+  const firstGroupedHint = page.getByRole('dialog')
   await expect(firstGroupedHint).toContainText('Правило цвета UI')
   await expect(firstGroupedHint).toContainText('Подправило цвета UI')
   await expect(firstGroupedHint).not.toContainText('Правило лица UI')
@@ -544,7 +584,7 @@ test('catalog groups rules and a grouped blank input keeps partial progress inde
   await expect(grouped).toBeFocused()
   const colorHistory = page.getByRole('button', { name: 'История ответов для пропуска 1' })
   await colorHistory.focus()
-  await expect(page.getByRole('tooltip').locator('ol li')).toHaveText(['zielony'])
+  await expect(page.getByRole('dialog').locator('ol li')).toHaveText(['zielony'])
   await colorHistory.press('Escape')
   await grouped.focus()
   await grouped.blur()
@@ -560,20 +600,53 @@ test('catalog groups rules and a grouped blank input keeps partial progress inde
   await expectAttemptDots(page, 'person', ['red', 'green', 'gray'])
   await expect(grouped).toBeEnabled()
   await expect(grouped).toHaveAttribute('readonly', '')
+  await expect(page.getByText('(подсказка общего поля)', { exact: true })).toBeVisible()
   await expect(grouped).not.toBeEditable()
   await grouped.focus()
-  const bothGroupedHint = page.getByRole('tooltip')
+  const bothGroupedHint = page.getByRole('dialog')
   await expect(bothGroupedHint).toContainText('Пропуск 1')
   await expect(bothGroupedHint).toContainText('Пропуск 2')
   await expect(bothGroupedHint).toContainText('Правило цвета UI')
   await expect(bothGroupedHint).toContainText('Правило лица UI')
   const bothHintText = await bothGroupedHint.innerText()
   expect(bothHintText.indexOf('Пропуск 1')).toBeLessThan(bothHintText.indexOf('Пропуск 2'))
+  const groupedHintSections = bothGroupedHint.locator('section')
+  await expect(groupedHintSections).toHaveCount(2)
+  for (let index = 0; index < 2; index += 1) {
+    const section = groupedHintSections.nth(index)
+    await expect(section.getByRole('link', { name: 'Открыть правило' })).toHaveCount(1)
+    await expect(section.getByRole('link', { name: 'Открыть правило' })).toHaveAttribute('href', `/rules/${ruleId}`)
+  }
+  await page.setViewportSize({ width: 320, height: 800 })
+  const narrowViewportWidth = await page.evaluate(() => window.innerWidth)
+  const dialogMetrics = await bothGroupedHint.evaluate(element => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }))
+  expect(dialogMetrics.clientWidth).toBeLessThanOrEqual(narrowViewportWidth - 32)
+  expect(dialogMetrics.scrollWidth).toBeLessThanOrEqual(dialogMetrics.clientWidth)
+  const descriptionMetrics = await bothGroupedHint.locator('.rule-description').first().evaluate(element => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }))
+  expect(descriptionMetrics.scrollWidth).toBeLessThanOrEqual(descriptionMetrics.clientWidth)
+  const ordinaryContentMetrics = await bothGroupedHint.locator('.rule-description').first().locator('p, li').evaluateAll(elements => elements.map(element => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  })))
+  expect(ordinaryContentMetrics.length).toBeGreaterThan(1)
+  expect(ordinaryContentMetrics.every(({ scrollWidth, clientWidth }) => scrollWidth <= clientWidth)).toBe(true)
+  const popoverTable = bothGroupedHint.locator('.rule-description table').first()
+  const tableMetrics = await popoverTable.evaluate(element => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }))
+  expect(tableMetrics.scrollWidth).toBeGreaterThan(tableMetrics.clientWidth)
   await grouped.press('Escape')
   await expect(grouped).toBeFocused()
   const personHistory = page.getByRole('button', { name: 'История ответов для пропуска 2' })
   await personHistory.focus()
-  await expect(page.getByRole('tooltip').locator('ol li')).toHaveText(['kolega', 'kolega Mateusz'])
+  await expect(page.getByRole('dialog').locator('ol li')).toHaveText(['kolega', 'kolega Mateusz'])
   await personHistory.press('Escape')
 
   const exhaust = async (answer: string) => {
@@ -603,6 +676,141 @@ test('catalog groups rules and a grouped blank input keeps partial progress inde
   await expectAttemptDots(page, 'color', ['red', 'red', 'red'])
   await expectAttemptDots(page, 'person', ['red', 'red', 'red'])
 
+  await context.close()
+  await api.dispose()
+})
+
+test('learner rule popover and page preserve rich descriptions and canonicalize deep links', async ({ browser }) => {
+  const {
+    api,
+    exerciseSlug,
+    adminUsername,
+    adminPassword,
+    rootRuleId,
+    explicitRuleId,
+    explicitRuleTitle,
+    explicitGrandchildTitle,
+    explicitGrandchildId,
+  } = await createFillExercise('rich')
+  const adminLogin = await api.post('/users/token', { form: { username: adminUsername, password: adminPassword } })
+  expect(adminLogin.status()).toBe(200)
+  const adminToken = (await adminLogin.json() as { access_token: string }).access_token
+  const adminHeaders = { Authorization: `Bearer ${adminToken}` }
+  const tableCells = Array.from({ length: 8 }, (_, index) => `<td>Cell ${index + 1} with a long value</td>`).join('')
+  const realisticRuleHtml = '<p>Większość <strong>rzeczowników</strong> rodzaju <strong>męskiego</strong> otrzymuje w narzędniku liczby pojedynczej końcówkę <strong>-em</strong>.</p><p></p><p><em>Przykłady</em>:</p><p><strong>student → studentem</strong><br><strong>nauczyciel → nauczycielem</strong><br><strong>lekarz → lekarzem</strong><br><strong>brat → bratem</strong><br><strong>syn → synem</strong></p>'
+  const richDescription = `${realisticRuleHtml}<p>Правило <strong>жирное</strong>, <em>курсив</em> и <u>подчёркнутое</u>.</p><ul><li>Первый пункт</li><li>Второй пункт</li></ul><p><span data-font-size="14">Маленький</span> и <span data-font-size="20">большой</span> текст.</p><table><tbody><tr>${tableCells}</tr></tbody></table>`
+  const updatedRule = await api.put(`/admin/rules/${explicitRuleId}`, {
+    headers: adminHeaders,
+    data: { title: explicitRuleTitle, description: richDescription, parent_rule_id: rootRuleId },
+  })
+  expect(updatedRule.status()).toBe(200)
+  expect((await updatedRule.json() as { description: string }).description).toBe(richDescription)
+
+  const learnerUsername = 'browser-rule-page-student-rich-qa'
+  const learnerPassword = 'safe-browser-rule-page-password-8'
+  const registration = await api.post('/users/register', {
+    data: { username: learnerUsername, email: `${learnerUsername}@example.com`, password: learnerPassword },
+  })
+  expect(registration.status()).toBe(200)
+  const learnerLogin = await api.post('/users/token', { form: { username: learnerUsername, password: learnerPassword } })
+  expect(learnerLogin.status()).toBe(200)
+  const learnerToken = (await learnerLogin.json() as { access_token: string }).access_token
+  const learnerHeaders = { Authorization: `Bearer ${learnerToken}` }
+  const learnerMe = await api.get('/users/me', { headers: learnerHeaders })
+  expect(learnerMe.status()).toBe(200)
+  expect((await learnerMe.json() as { is_superuser: boolean }).is_superuser).toBe(false)
+  const context = await browser.newContext()
+  const page = await context.newPage()
+  await page.goto('/login')
+  await page.evaluate((token) => {
+    localStorage.setItem('access_token', token)
+    localStorage.setItem('token_type', 'bearer')
+  }, learnerToken)
+  await page.goto(`/exercises/${exerciseSlug}`)
+  await expect(page).toHaveURL(new RegExp(`/exercises/${exerciseSlug}\\?session_id=${publicId}$`))
+  const cat = page.getByRole('textbox', { name: 'Ответ для задания 1' }).first()
+  const check = page.waitForResponse(response => response.url().includes('/actions') && response.request().method() === 'POST')
+  await cat.fill('kota')
+  await cat.blur()
+  await check
+  await expect(cat).toHaveAttribute('readonly', '')
+
+  await cat.focus()
+  const popover = page.getByRole('dialog', { name: 'Подсказка правила' })
+  await expect(popover).toBeVisible()
+  await expect(popover.locator('strong').filter({ hasText: 'жирное' })).toHaveText('жирное')
+  await expect(popover.locator('em').filter({ hasText: 'курсив' })).toHaveText('курсив')
+  await expect(popover.locator('u').filter({ hasText: 'подчёркнутое' })).toHaveText('подчёркнутое')
+  const formattedPopover = popover.locator('.rule-description').first()
+  await expect(formattedPopover.locator('ul li')).toHaveText(['Первый пункт', 'Второй пункт'])
+  await expect(formattedPopover.locator('span[data-font-size="14"]')).toHaveText('Маленький')
+  await expect(formattedPopover.locator('span[data-font-size="20"]')).toHaveText('большой')
+  await expect(formattedPopover.locator('table td')).toHaveCount(8)
+  await expect(formattedPopover.locator('p').first()).toContainText('Większość rzeczowników rodzaju męskiego')
+  await expect(formattedPopover.locator('p').nth(2)).toContainText('Przykłady')
+  await expect(formattedPopover.locator('p').nth(3)).toContainText('student → studentem')
+  const desktopViewportWidth = await page.evaluate(() => window.innerWidth)
+  const desktopPopoverMetrics = await popover.evaluate(element => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }))
+  expect(desktopPopoverMetrics.clientWidth).toBeLessThanOrEqual(512)
+  expect(desktopPopoverMetrics.clientWidth).toBeLessThanOrEqual(desktopViewportWidth - 32)
+  const ordinaryDesktopMetrics = await formattedPopover.locator('p, li, span').evaluateAll(elements => elements.map(element => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  })))
+  expect(ordinaryDesktopMetrics.length).toBeGreaterThan(1)
+  expect(ordinaryDesktopMetrics.every(({ scrollWidth, clientWidth }) => scrollWidth <= clientWidth)).toBe(true)
+  const firstParagraphMetrics = await formattedPopover.locator('p').first().evaluate(element => {
+    const styles = getComputedStyle(element)
+    return { clientHeight: element.clientHeight, lineHeight: parseFloat(styles.lineHeight) }
+  })
+  expect(firstParagraphMetrics.clientHeight).toBeGreaterThan(firstParagraphMetrics.lineHeight)
+  const ruleLink = popover.getByRole('link', { name: 'Открыть правило' })
+  await expect(ruleLink).toHaveAttribute('href', `/rules/${rootRuleId}`)
+  await ruleLink.focus()
+  await expect(popover).toBeVisible()
+  await ruleLink.click()
+  await expect(page).toHaveURL(new RegExp(`/rules/${rootRuleId}$`))
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Правила польского языка')
+  await expect(page.getByRole('heading', { name: explicitRuleTitle, exact: true })).toBeVisible()
+  await expect(page.locator('main main')).toHaveCount(0)
+  await expect(page.locator('.rule-description strong').filter({ hasText: 'жирное' })).toHaveText('жирное')
+  await expect(page.locator('.rule-description em').filter({ hasText: 'курсив' })).toHaveText('курсив')
+  await expect(page.locator('.rule-description u').filter({ hasText: 'подчёркнутое' })).toHaveText('подчёркнутое')
+  await expect(page.locator('.rule-description ul li')).toHaveText(['Первый пункт', 'Второй пункт'])
+
+  await page.setViewportSize({ width: 320, height: 800 })
+  const ruleTable = page.locator('.rule-description table')
+  await expect(ruleTable).toBeVisible()
+  const tableOverflow = await ruleTable.evaluate(element => element.scrollWidth > element.clientWidth)
+  expect(tableOverflow).toBe(true)
+
+  await page.goto(`/rules/${explicitGrandchildId}`)
+  await expect(page).toHaveURL(new RegExp(`/rules/${rootRuleId}$`))
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Правила польского языка')
+  await expect(page.getByRole('heading', { name: explicitGrandchildTitle, exact: true })).toBeVisible()
+
+  await page.goto('/rules/999999')
+  await expect(page.getByRole('heading', { name: 'Правило не найдено' })).toBeVisible()
+
+  const adminContext = await browser.newContext()
+  const adminPage = await adminContext.newPage()
+  await adminPage.goto('/login')
+  await adminPage.evaluate((token) => {
+    localStorage.setItem('access_token', token)
+    localStorage.setItem('token_type', 'bearer')
+  }, adminToken)
+  await adminPage.goto(`/rules/${rootRuleId}`)
+  await expect(adminPage).toHaveURL(/\/admin\/exercises$/)
+  await adminContext.close()
+
+  const visitorContext = await browser.newContext()
+  const visitorPage = await visitorContext.newPage()
+  await visitorPage.goto(`/rules/${rootRuleId}`)
+  await expect(visitorPage).toHaveURL(/\/login$/)
+  await visitorContext.close()
   await context.close()
   await api.dispose()
 })

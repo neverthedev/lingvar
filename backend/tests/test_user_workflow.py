@@ -465,3 +465,172 @@ def test_administrator_manages_a_rule_forest_atomically(test_engine, test_databa
             {"id": atomic_parent["id"], "parent_rule_id": None},
             {"id": atomic_child["id"], "parent_rule_id": atomic_parent["id"]},
         ]
+
+
+def test_rule_rich_descriptions_and_learner_tree_are_safe_and_canonical(test_engine, test_database_url):
+    """Rich descriptions, learner projections and authorization share one PostgreSQL workflow."""
+    _upgrade_schema(test_database_url)
+    admin_username = "rich-rules-admin-qa"
+    admin_password = "safe-rich-rules-admin-password-8"
+    created = _create_admin(
+        test_database_url,
+        admin_username,
+        "rich-rules-admin-qa@example.com",
+        admin_password,
+    )
+    assert created.returncode == 0, created.stderr
+
+    from main import app
+
+    rich_html = (
+        '<p>Base <strong>bold</strong> <em>italic</em> <u>underlined</u><br>line</p>'
+        '<ul><li>first</li><li>second</li></ul>'
+        '<ol><li>one</li><li>two</li></ol>'
+        '<p><span data-font-size="14">small</span> normal '
+        '<span data-font-size="20">large</span></p>'
+        '<table><tbody><tr><td>A1</td><td>A2</td></tr>'
+        '<tr><td>B1</td><td>B2</td></tr></tbody></table>'
+    )
+    with TestClient(app) as client:
+        admin_headers = _authorization_header(client, admin_username, admin_password)
+        root_response = client.post(
+            "/admin/rules",
+            headers=admin_headers,
+            json={"title": "Rich root", "description": rich_html, "parent_rule_id": None},
+        )
+        assert root_response.status_code == 201, root_response.text
+        root = root_response.json()
+        assert root["description"] == rich_html
+
+        child_response = client.post(
+            "/admin/rules",
+            headers=admin_headers,
+            json={"title": "Rich child", "description": "<p>Child <strong>description</strong></p>", "parent_rule_id": root["id"]},
+        )
+        assert child_response.status_code == 201, child_response.text
+        child = child_response.json()
+        grandchild_response = client.post(
+            "/admin/rules",
+            headers=admin_headers,
+            json={"title": "Rich grandchild", "description": "<p>Grandchild</p>", "parent_rule_id": child["id"]},
+        )
+        assert grandchild_response.status_code == 201, grandchild_response.text
+        sibling_response = client.post(
+            "/admin/rules",
+            headers=admin_headers,
+            json={"title": "Rich sibling", "description": "<p>Sibling</p>", "parent_rule_id": root["id"]},
+        )
+        assert sibling_response.status_code == 201, sibling_response.text
+
+        updated = client.put(
+            f"/admin/rules/{child['id']}",
+            headers=admin_headers,
+            json={"title": child["title"], "description": rich_html, "parent_rule_id": root["id"]},
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["description"] == rich_html
+
+        learner_payload = {
+            "username": "rich-rules-student-qa",
+            "email": "rich-rules-student-qa@example.com",
+            "password": "safe-rich-rules-student-password-8",
+        }
+        registration = client.post("/users/register", json=learner_payload)
+        assert registration.status_code == 200, registration.text
+        student_headers = _authorization_header(client, learner_payload["username"], learner_payload["password"])
+
+        root_projection = client.get(f"/api/rules/{root['id']}", headers=student_headers)
+        assert root_projection.status_code == 200, root_projection.text
+        root_payload = root_projection.json()
+        assert root_payload["canonical_rule_id"] == root["id"]
+        assert root_payload["rule"]["id"] == root["id"]
+        assert root_payload["rule"]["description"] == rich_html
+        assert [node["title"] for node in root_payload["rule"]["children"]] == ["Rich child", "Rich sibling"]
+        assert root_payload["rule"]["children"][0]["description"] == rich_html
+        assert root_payload["rule"]["children"][0]["children"][0]["title"] == "Rich grandchild"
+        assert "definition" not in str(root_payload)
+        assert "accepted_answers" not in str(root_payload)
+        assert "parent_rule_id" not in str(root_payload)
+
+        deep_projection = client.get(f"/api/rules/{grandchild_response.json()['id']}", headers=student_headers)
+        assert deep_projection.status_code == 200, deep_projection.text
+        assert deep_projection.json()["canonical_rule_id"] == root["id"]
+        assert deep_projection.json()["rule"] == root_payload["rule"]
+
+        sanitized_descriptions = (
+            ("<p>safe</p><script>alert(1)</script>", "<p>safe</p>"),
+            ('<p><a href="https://example.com">link</a></p>', "<p>link</p>"),
+            ('<p><img src="/unsafe.png">image</p>', "<p>image</p>"),
+            ('<p style="color:red">style</p>', "<p>style</p>"),
+            ('<p onmouseover="alert(1)">handler</p>', "<p>handler</p>"),
+            ('<p data-foreign="x">foreign attribute</p>', "<p>foreign attribute</p>"),
+            ('<p><span data-font-size="999">invalid size</span></p>', "<p><span>invalid size</span></p>"),
+            ("<h1>unsupported heading</h1>", "unsupported heading"),
+        )
+        for unsafe_description, expected_description in sanitized_descriptions:
+            sanitized = client.put(
+                f"/admin/rules/{root['id']}",
+                headers=admin_headers,
+                json={"title": root["title"], "description": unsafe_description, "parent_rule_id": None},
+            )
+            assert sanitized.status_code == 200, sanitized.text
+            assert sanitized.json()["description"] == expected_description
+            assert "script" not in sanitized.json()["description"]
+            assert "href=" not in sanitized.json()["description"]
+            assert "style=" not in sanitized.json()["description"]
+            assert "onmouseover" not in sanitized.json()["description"]
+            assert "data-font-size=\"999\"" not in sanitized.json()["description"]
+
+        # Unsupported markup is filtered silently, but an empty result still
+        # follows the ordinary required-field validation and leaves the row
+        # unchanged.
+        for empty_description in ("<p>&nbsp;</p>", "<p><br></p>", "<table><tbody></tbody></table>"):
+            before_empty = client.get("/admin/rules", headers=admin_headers)
+            assert before_empty.status_code == 200, before_empty.text
+            before_empty_root = next(node for node in before_empty.json() if node["id"] == root["id"])
+            rejected = client.put(
+                f"/admin/rules/{root['id']}",
+                headers=admin_headers,
+                json={"title": root["title"], "description": empty_description, "parent_rule_id": None},
+            )
+            assert rejected.status_code == 422, rejected.text
+            assert any(issue["loc"] == ["body", "description"] for issue in rejected.json()["detail"])
+            unchanged = client.get("/admin/rules", headers=admin_headers)
+            assert unchanged.status_code == 200, unchanged.text
+            unchanged_root = next(node for node in unchanged.json() if node["id"] == root["id"])
+            assert unchanged_root["description"] == before_empty_root["description"]
+
+        # Restore the rich fixture before checking defensive projection of a
+        # legacy row that bypassed the write endpoint.
+        restored = client.put(
+            f"/admin/rules/{root['id']}",
+            headers=admin_headers,
+            json={"title": root["title"], "description": rich_html, "parent_rule_id": None},
+        )
+        assert restored.status_code == 200, restored.text
+        assert restored.json()["description"] == rich_html
+
+        with test_engine.begin() as connection:
+            connection.execute(
+                text("UPDATE rules SET description = :description WHERE id = :id"),
+                {
+                    "id": root["id"],
+                    "description": (
+                        '<p>Stored <strong>safe</strong> '
+                        '<span data-font-size="999">legacy size</span></p><script>bad()</script>'
+                    ),
+                },
+            )
+        defensive_admin_projection = client.get("/admin/rules", headers=admin_headers)
+        assert defensive_admin_projection.status_code == 200, defensive_admin_projection.text
+        defensive_admin_root = next(node for node in defensive_admin_projection.json() if node["id"] == root["id"])
+        assert defensive_admin_root["description"] == '<p>Stored <strong>safe</strong> <span>legacy size</span></p>'
+        assert 'data-font-size="999"' not in str(defensive_admin_projection.json())
+        sanitized_projection = client.get(f"/api/rules/{root['id']}", headers=student_headers)
+        assert sanitized_projection.status_code == 200, sanitized_projection.text
+        assert sanitized_projection.json()["rule"]["description"] == '<p>Stored <strong>safe</strong> <span>legacy size</span></p>'
+        assert 'data-font-size="999"' not in str(sanitized_projection.json())
+
+        assert client.get(f"/api/rules/{root['id']}").status_code == 401
+        assert client.get(f"/api/rules/{root['id']}", headers=admin_headers).status_code == 403
+        assert client.get("/api/rules/999999", headers=student_headers).status_code == 404

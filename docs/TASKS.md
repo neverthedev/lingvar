@@ -12,3 +12,4 @@
 | TASK-008 | [Общий лейаут, каталог и упражнение с пропусками](tasks/TASK-008.md) | `task-08-exercise-layout` | завершена |
 | TASK-009 | [Связь упражнений с правилами](tasks/TASK-009.md) | `task-09-exercise-rule-mapping` | завершена |
 | TASK-010 | [Подсказки правил и история ответов в пропусках](tasks/TASK-010.md) | `task-10-rule-hints` | завершена |
+| TASK-011 | [Форматируемые описания и просмотр правил учеником](tasks/TASK-011.md) | `task-11-rule-rich-description` | ожидает ревью PO |

@@ -1,7 +1,5 @@
 """Administrative CRUD endpoints for the hierarchy of learning rules."""
 
-from collections import defaultdict
-
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field, validator
 from sqlalchemy import text
@@ -12,6 +10,7 @@ from models.exercise import Exercise
 from models.vocabulary import Rule
 from services.database import get_db
 from services.exercises import exercise_blank_rule_references, lock_rules_table, stored_rule_assignments_are_valid
+from services.rules import RuleDescriptionError, build_rule_forest, rule_sort_key, sanitize_rule_description
 
 
 router = APIRouter(prefix="/rules", tags=["admin"])
@@ -22,12 +21,19 @@ class RulePayload(BaseModel):
     description: str
     parent_rule_id: int | None = None
 
-    @validator("title", "description")
-    def trim_and_require_content(cls, value: str) -> str:
+    @validator("title")
+    def trim_and_require_title(cls, value: str) -> str:
         value = value.strip()
         if not value:
             raise ValueError("This field must not be empty.")
         return value
+
+    @validator("description")
+    def validate_description(cls, value: str) -> str:
+        try:
+            return sanitize_rule_description(value, strict=True)
+        except RuleDescriptionError as error:
+            raise ValueError(str(error)) from error
 
     @validator("title")
     def title_must_fit_storage_limit(cls, value: str) -> str:
@@ -48,42 +54,15 @@ class RuleNode(BaseModel):
 RuleNode.update_forward_refs()
 
 
-def _rule_sort_key(rule: Rule) -> tuple[bool, int, str, int]:
-    """Keep legacy rows with empty/duplicate order values deterministic."""
-    return (
-        rule.ordering is None,
-        rule.ordering if rule.ordering is not None else 0,
-        rule.title,
-        rule.id,
-    )
-
-
 def _node_from_rule(rule: Rule, children: list[RuleNode] | None = None) -> RuleNode:
     return RuleNode(
         id=rule.id,
         title=rule.title,
-        description=rule.description,
+        description=sanitize_rule_description(rule.description, strict=False),
         parent_rule_id=rule.parent_rule_id,
         ordering=rule.ordering,
         children=children or [],
     )
-
-
-def _build_forest(rules: list[Rule]) -> list[RuleNode]:
-    children_by_parent: dict[int | None, list[Rule]] = defaultdict(list)
-    known_ids = {rule.id for rule in rules}
-    for rule in rules:
-        # A broken legacy reference is still shown rather than silently hiding a rule.
-        parent_id = rule.parent_rule_id if rule.parent_rule_id in known_ids else None
-        children_by_parent[parent_id].append(rule)
-
-    def build(parent_id: int | None) -> list[RuleNode]:
-        return [
-            _node_from_rule(rule, build(rule.id))
-            for rule in sorted(children_by_parent[parent_id], key=_rule_sort_key)
-        ]
-
-    return build(None)
 
 
 def _get_rule_or_404(db: Session, rule_id: int, message: str = "Rule was not found.") -> Rule:
@@ -137,7 +116,7 @@ def _next_ordering(db: Session, parent_rule_id: int | None, exclude_rule_id: int
 @router.get("", response_model=list[RuleNode])
 async def list_rules(db: Session = Depends(get_db)):
     """Return the complete rule forest in its display order."""
-    return _build_forest(db.query(Rule).all())
+    return build_rule_forest(db.query(Rule).all(), include_admin_fields=True)
 
 
 @router.post("", response_model=RuleNode, status_code=status.HTTP_201_CREATED)
@@ -225,7 +204,7 @@ async def delete_rule(rule_id: int, db: Session = Depends(get_db)) -> Response:
             .all()
         )
         next_ordering = _next_ordering(db, new_parent_id, exclude_rule_id=rule.id)
-        for index, child in enumerate(sorted(children, key=_rule_sort_key)):
+        for index, child in enumerate(sorted(children, key=rule_sort_key)):
             # Do this with SQL rather than ``db.delete(rule)`` plus ORM field
             # assignments.  The self-referential relationship's delete cascade
             # bookkeeping may otherwise null out a loaded child's FK again.

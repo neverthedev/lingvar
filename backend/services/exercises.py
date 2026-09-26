@@ -11,7 +11,6 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import base64
 import secrets
-from collections import defaultdict
 from typing import Any, Callable
 
 from fastapi import HTTPException
@@ -31,6 +30,7 @@ from schemas.exercises import (
     SelfCheckDefinition,
     SingleInputDefinition,
 )
+from services.rules import children_by_parent, root_rule_id, rule_projection, rule_sort_key, safe_rule_hint_snapshot, subtree_ids
 
 
 DefinitionModel = type[BaseModel]
@@ -180,19 +180,31 @@ def _serialize_fill_blanks(_db: Session, definition: dict[str, Any], _user_id: i
         index = 0
         while index < len(parts):
             part = parts[index]
-            if part["kind"] != "blank" or part.get("hint") is not None:
+            if part["kind"] != "blank":
                 result.append({"kind": "blank", "id": part["id"], "hint": part.get("hint")} if part["kind"] == "blank" else part)
                 index += 1
                 continue
+
+            # A hint may belong to the final blank of a shared field, but it
+            # must never be crossed. This also leaves the following blanks
+            # available to form their own group after a hinted blank.
             group: list[dict[str, Any]] = []
-            while index < len(parts) and parts[index]["kind"] == "blank" and parts[index].get("hint") is None:
+            group_hint: str | None = None
+            while index < len(parts) and parts[index]["kind"] == "blank":
                 blank = parts[index]
                 group.append({"id": blank["id"], "word_count": len(blank["accepted_answers"][0].split())})
                 index += 1
+                if blank.get("hint") is not None:
+                    group_hint = blank["hint"]
+                    break
             if len(group) == 1:
-                result.append({"kind": "blank", "id": group[0]["id"], "hint": None})
+                result.append({"kind": "blank", "id": group[0]["id"], "hint": group_hint})
             else:
-                result.append({"kind": "blank_group", "blanks": group})
+                result.append({
+                    "kind": "blank_group",
+                    "blanks": group,
+                    **({"hint": group_hint} if group_hint is not None else {}),
+                })
         return result
 
     return {
@@ -259,21 +271,6 @@ def lock_rules_table(db: Session) -> None:
     db.execute(text("LOCK TABLE rules IN SHARE ROW EXCLUSIVE MODE"))
 
 
-def _subtree_ids(rules: list[Rule], root_id: int) -> set[int]:
-    children: dict[int | None, list[int]] = {}
-    for rule in rules:
-        children.setdefault(rule.parent_rule_id, []).append(rule.id)
-    result = {root_id}
-    pending = [root_id]
-    while pending:
-        current = pending.pop()
-        for child_id in children.get(current, []):
-            if child_id not in result:
-                result.add(child_id)
-                pending.append(child_id)
-    return result
-
-
 def validate_exercise_rule_assignment(
     db: Session, rule_id: int, type_code: str, definition: dict[str, Any],
 ) -> None:
@@ -284,7 +281,7 @@ def validate_exercise_rule_assignment(
         raise _validation_error(["rule_id"], "Выбранное правило не существует")
     if type_code != "fill_blanks":
         return
-    allowed_ids = _subtree_ids(rules, rule_id)
+    allowed_ids = subtree_ids(rules, rule_id)
     for item_index, item in enumerate(definition["items"]):
         for part_index, part in enumerate(item["parts"]):
             blank_rule_id = part.get("rule_id") if part["kind"] == "blank" else None
@@ -314,7 +311,7 @@ def stored_rule_assignments_are_valid(db: Session) -> bool:
     for exercise in db.query(Exercise).all():
         if exercise.rule_id not in rule_ids:
             return False
-        allowed_ids = _subtree_ids(rules, exercise.rule_id)
+        allowed_ids = subtree_ids(rules, exercise.rule_id)
         if any(blank_rule_id not in allowed_ids for blank_rule_id in exercise_blank_rule_references(exercise)):
             return False
     return True
@@ -374,41 +371,18 @@ def _blank_state(*, answer_history: bool = False) -> dict[str, Any]:
     return state
 
 
-def _rule_sort_key(rule: Rule) -> tuple[bool, int, str, int]:
-    """Match the stable learner/admin tree order without exposing rule IDs."""
-    return (
-        rule.ordering is None,
-        rule.ordering if rule.ordering is not None else 0,
-        rule.title,
-        rule.id,
-    )
-
-
 def _fill_blanks_rule_hints(db: Session, definition: FillBlanksDefinition, exercise_rule_id: int) -> dict[str, dict[str, Any]]:
     """Freeze the learner-safe rule subtree for every blank in a session."""
     rules = db.query(Rule).all()
     by_id = {rule.id: rule for rule in rules}
-    children_by_parent: dict[int, list[Rule]] = defaultdict(list)
-    for rule in rules:
-        if rule.parent_rule_id in by_id:
-            children_by_parent[rule.parent_rule_id].append(rule)
+    children = children_by_parent(rules)
 
-    def snapshot(rule_id: int, ancestors: frozenset[int] = frozenset()) -> dict[str, Any]:
+    def snapshot(rule_id: int) -> dict[str, Any]:
         rule = by_id.get(rule_id)
-        if rule is None:
-            # An exercise with a broken legacy rule reference cannot provide a
-            # truthful learner snapshot; do not silently omit the hint.
+        root_id = root_rule_id(rules, rule_id)
+        if rule is None or root_id is None:
             raise HTTPException(status_code=409, detail="Правило упражнения недоступно")
-        lineage = ancestors | {rule_id}
-        return {
-            "title": rule.title,
-            "description": rule.description,
-            "children": [
-                snapshot(child.id, lineage)
-                for child in sorted(children_by_parent[rule_id], key=_rule_sort_key)
-                if child.id not in lineage
-            ],
-        }
+        return {**rule_projection(rule, children, include_ids=False), "root_rule_id": root_id}
 
     return {
         part.id: snapshot(part.rule_id if part.rule_id is not None else exercise_rule_id)
@@ -494,7 +468,11 @@ def _payload(session: ExerciseSession) -> dict[str, Any]:
         "expires_at": session.expires_at,
         "revision": session.revision,
         **deepcopy(state["metadata"]),
-        "content": deepcopy(state["content"]),
+        "content": {
+            **deepcopy(state["content"]),
+            **({"rule_hints": {key: safe_rule_hint_snapshot(value) for key, value in state["content"].get("rule_hints", {}).items()}}
+               if state["metadata"]["type_code"] == "fill_blanks" else {}),
+        },
         "progress": _public_progress(state),
     }
 

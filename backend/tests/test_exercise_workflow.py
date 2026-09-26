@@ -325,7 +325,10 @@ def test_blank_groups_split_answers_and_preserve_independent_state(test_engine, 
             for blank in grouped_blanks
         )
         assert "accepted_answers" not in str(exact["content"])
-        assert "rule_id" not in str(exact["content"])
+        assert all(
+            set(hint) == {"title", "description", "children", "root_rule_id"}
+            for hint in exact["content"]["rule_hints"].values()
+        )
         action_url = f"/api/exercises/qa-blank-group/sessions/{exact['session_id']}/actions"
         checked = client.post(action_url, headers=student, json={
             "action": "fill_blank_group_check", "blank_ids": ["color", "person"],
@@ -362,6 +365,76 @@ def test_blank_groups_split_answers_and_preserve_independent_state(test_engine, 
         })
         assert stale.status_code == 200, stale.text
         assert stale.json()["revision"] == 3
+
+
+def test_blank_groups_keep_final_hint_and_split_earlier_hint_or_text(test_engine, test_database_url):
+    """A final text hint belongs to one shared field; earlier hints and text split fields."""
+    upgrade_schema(test_database_url)
+    from main import app
+
+    with TestClient(app) as client:
+        admin = _admin_headers(client, test_database_url)
+
+        def create_rule(title: str, parent_rule_id: int | None = None) -> dict:
+            response = client.post("/admin/rules", headers=admin, json={
+                "title": title,
+                "description": f"Описание {title}",
+                "parent_rule_id": parent_rule_id,
+            })
+            assert response.status_code == 201, response.text
+            return response.json()
+
+        root = create_rule("Корень группировки подсказок QA")
+        first_rule = create_rule("Первое правило группировки QA", root["id"])
+        second_rule = create_rule("Второе правило группировки QA", root["id"])
+        definition = {"items": [{"id": "sentence", "parts": [
+            {"kind": "blank", "id": "shared-first", "hint": None, "rule_id": first_rule["id"], "accepted_answers": ["pierwszy"]},
+            {"kind": "blank", "id": "shared-last", "hint": "подсказка общего поля", "rule_id": second_rule["id"], "accepted_answers": ["drugi"]},
+            {"kind": "blank", "id": "early-hint", "hint": "ранняя подсказка", "rule_id": first_rule["id"], "accepted_answers": ["trzeci"]},
+            {"kind": "blank", "id": "after-early", "hint": None, "rule_id": second_rule["id"], "accepted_answers": ["czwarty"]},
+            {"kind": "blank", "id": "after-early-last", "hint": None, "rule_id": first_rule["id"], "accepted_answers": ["piąty"]},
+            {"kind": "text", "text": "; "},
+            {"kind": "blank", "id": "text-first", "hint": None, "rule_id": first_rule["id"], "accepted_answers": ["szósty"]},
+            {"kind": "text", "text": ", "},
+            {"kind": "blank", "id": "text-last", "hint": None, "rule_id": second_rule["id"], "accepted_answers": ["siódmy"]},
+        ]}]}
+        created = client.post(
+            "/admin/exercises",
+            headers=admin,
+            json=_exercise_payload("fill_blanks", definition, slug="qa-final-hint-group", status="published", rule_id=root["id"]),
+        )
+        assert created.status_code == 201, created.text
+
+        student = _student_headers(client, "final-hint-group-student-qa")
+        session = client.post("/api/exercises/qa-final-hint-group/sessions", headers=student)
+        assert session.status_code == 201, session.text
+        parts = session.json()["content"]["items"][0]["parts"]
+        assert parts == [
+            {"kind": "blank_group", "blanks": [
+                {"id": "shared-first", "word_count": 1},
+                {"id": "shared-last", "word_count": 1},
+            ], "hint": "подсказка общего поля"},
+            {"kind": "blank", "id": "early-hint", "hint": "ранняя подсказка"},
+            {"kind": "blank_group", "blanks": [
+                {"id": "after-early", "word_count": 1},
+                {"id": "after-early-last", "word_count": 1},
+            ]},
+            {"kind": "text", "text": "; "},
+            {"kind": "blank", "id": "text-first", "hint": None},
+            {"kind": "text", "text": ", "},
+            {"kind": "blank", "id": "text-last", "hint": None},
+        ]
+
+        hints = session.json()["content"]["rule_hints"]
+        assert set(hints) == {
+            "shared-first", "shared-last", "early-hint", "after-early", "after-early-last",
+            "text-first", "text-last",
+        }
+        assert hints["shared-first"]["title"] == first_rule["title"]
+        assert hints["shared-last"]["title"] == second_rule["title"]
+        assert hints["shared-first"]["root_rule_id"] == root["id"]
+        assert hints["shared-last"]["root_rule_id"] == root["id"]
+        assert "accepted_answers" not in str(session.json())
 
 
 def test_fill_blank_rule_snapshots_and_answer_history_survive_restore_and_restart(test_engine, test_database_url):
@@ -411,6 +484,7 @@ def test_fill_blank_rule_snapshots_and_answer_history_survive_restore_and_restar
         expected_hints = {
             "explicit": {
                 "title": mapped["title"], "description": mapped["description"],
+                "root_rule_id": root["id"],
                 "children": [
                     {
                         "title": mapped_first["title"], "description": mapped_first["description"],
@@ -421,6 +495,7 @@ def test_fill_blank_rule_snapshots_and_answer_history_survive_restore_and_restar
             },
             "inherited": {
                 "title": root["title"], "description": root["description"],
+                "root_rule_id": root["id"],
                 "children": [
                     {
                         "title": mapped["title"], "description": mapped["description"],
@@ -438,12 +513,22 @@ def test_fill_blank_rule_snapshots_and_answer_history_survive_restore_and_restar
         }
         assert snapshot["content"]["rule_hints"] == {
             **expected_hints,
-            "color": expected_hints["explicit"]["children"][0],
-            "person": expected_hints["explicit"]["children"][1],
+            "color": {**expected_hints["explicit"]["children"][0], "root_rule_id": root["id"]},
+            "person": {**expected_hints["explicit"]["children"][1], "root_rule_id": root["id"]},
         }
         assert set(snapshot["content"]["rule_hints"]) == {"explicit", "inherited", "color", "person"}
         assert "accepted_answers" not in str(snapshot)
-        assert "rule_id" not in str(snapshot["content"])
+        assert all(
+            set(hint) == {"title", "description", "children", "root_rule_id"}
+            for hint in snapshot["content"]["rule_hints"].values()
+        )
+        def assert_root_rule_id_only_on_hint_root(node: dict, *, is_root: bool) -> None:
+            assert ("root_rule_id" in node) is is_root, node
+            for child in node["children"]:
+                assert_root_rule_id_only_on_hint_root(child, is_root=False)
+
+        for hint in snapshot["content"]["rule_hints"].values():
+            assert_root_rule_id_only_on_hint_root(hint, is_root=True)
         assert "answers" not in snapshot
         assert all(blank["answer_history"] == [] for blank in snapshot["progress"]["blanks"].values())
 

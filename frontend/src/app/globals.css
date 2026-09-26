@@ -26,6 +26,94 @@ body {
     rgb(var(--background-start-rgb));
 }
 
+.rule-description {
+  min-width: 0;
+  max-width: 100%;
+  font-size: 16px;
+  line-height: 1.6;
+  color: rgb(51 65 85);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.rule-description--compact {
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+/* Ordinary rule text must fit the popover. Tables deliberately keep their
+   own scrolling viewport below, rather than making the entire panel scroll. */
+.rule-description :is(p, li, span, strong, em, u) {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.rule-description table,
+.rule-description table :is(p, li, span, strong, em, u) {
+  min-width: auto;
+  max-width: none;
+  overflow-wrap: normal;
+}
+
+.rule-description p + p,
+.rule-description p + ul,
+.rule-description p + ol,
+.rule-description ul + p,
+.rule-description ol + p,
+.rule-description table + p {
+  margin-top: 0.75rem;
+}
+
+.rule-description ul,
+.rule-description ol {
+  margin: 0.75rem 0;
+  padding-left: 1.5rem;
+}
+
+.rule-description ul { list-style: disc; }
+.rule-description ol { list-style: decimal; }
+.rule-description li > ul,
+.rule-description li > ol { margin: 0.25rem 0; }
+
+.rule-description table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+}
+
+.rule-description tbody { display: table-row-group; }
+.rule-description tr { display: table-row; }
+.rule-description td {
+  display: table-cell;
+  min-width: 6rem;
+  border: 1px solid rgb(203 213 225);
+  padding: 0.5rem 0.65rem;
+  vertical-align: top;
+}
+
+.rule-description span[data-font-size="14"] { font-size: 14px; }
+.rule-description span[data-font-size="20"] { font-size: 20px; }
+
+/* Layout-only editor styles; they are never included in the saved fragment. */
+.rule-rich-editor .ProseMirror table {
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+}
+
+.rule-rich-editor .ProseMirror td {
+  min-width: 6rem;
+  border: 1px solid rgb(148 163 184);
+  padding: 0.5rem 0.65rem;
+  vertical-align: top;
+}
+
+.rule-rich-editor .ProseMirror p { margin: 0.5rem 0; }
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;

@@ -335,20 +335,28 @@ class LearnerBlankGroupBlank(StrictModel):
 class LearnerBlankGroupPart(StrictModel):
     kind: Literal["blank_group"]
     blanks: list[LearnerBlankGroupBlank] = Field(min_length=2)
+    hint: str | None = None
 
 
 LearnerFillBlanksPart = Annotated[Union[LearnerTextPart, LearnerBlankPart, LearnerBlankGroupPart], Field(discriminator="kind")]
 
 
-class LearnerRuleHint(StrictModel):
-    """Safe, immutable learner projection of a rule subtree."""
-
+class LearnerRuleHintNode(StrictModel):
     title: str
     description: str
-    children: list["LearnerRuleHint"] = Field(default_factory=list)
+    children: list["LearnerRuleHintNode"] = Field(default_factory=list)
 
 
-LearnerRuleHint.model_rebuild()
+LearnerRuleHintNode.model_rebuild()
+
+
+class LearnerRuleHint(StrictModel):
+    """Root of one immutable learner rule-hint tree."""
+
+    root_rule_id: int
+    title: str
+    description: str
+    children: list[LearnerRuleHintNode] = Field(default_factory=list)
 
 
 class LearnerFillBlanksItem(StrictModel):

@@ -15,6 +15,7 @@ export const API_ENDPOINTS = {
   pronouns: `${API_BASE_URL}/api/pronouns/`,
   verbs: `${API_BASE_URL}/api/verbs/`,
   exercises: `${API_BASE_URL}/api/exercises/`,
+  rules: `${API_BASE_URL}/api/rules`,
   exerciseSessions: `${API_BASE_URL}/api/exercise-sessions`,
   adminExercises: `${API_BASE_URL}/admin/exercises`,
   adminExerciseTypes: `${API_BASE_URL}/admin/exercise-types`,
@@ -68,11 +69,14 @@ export type ExerciseContent = { slug: string; title: string; description: string
   { type_code: 'form_table'; content: { columns: ColumnDefinition[]; max_attempts: 3; statistics_word_type: string; rows: Array<{id:number; prompt:string; answers:Record<string,string>; weight?:number}> } } |
   { type_code: 'single_input'; content: { max_attempts: 3; reveal_after_exhaustion: true; items: Array<{id:number;prompt:string;answer:string}> } } |
   { type_code: 'self_check'; content: { items: Array<{id:number;prompt:string;answer:string}> } } |
-  { type_code: 'fill_blanks'; content: { items: Array<{id:string;parts:Array<{kind:'text';text:string}|{kind:'blank';id:string;hint:string|null}|{kind:'blank_group';blanks:Array<{id:string;word_count:number}>}>}> } }
+  { type_code: 'fill_blanks'; content: { items: Array<{id:string;parts:Array<{kind:'text';text:string}|{kind:'blank';id:string;hint:string|null}|{kind:'blank_group';blanks:Array<{id:string;word_count:number}>;hint?:string|null}>}> } }
 )
 
 export type AnswerState = { value: string | null; attempts_used: number; status: 'open' | 'correct' | 'exhausted'; last_check: 'correct' | 'incorrect' | null; revealed_answer?: string; revealed_answers?: string[] }
-export type RuleHint = { title: string; description: string; children: RuleHint[] }
+export type RuleHintNode = { title: string; description: string; children: RuleHintNode[] }
+export type RuleHint = { root_rule_id: number; title: string; description: string; children: RuleHintNode[] }
+export type LearnerRuleNode = { id: number; title: string; description: string; children: LearnerRuleNode[] }
+export type LearnerRuleResponse = { canonical_rule_id: number; rule: LearnerRuleNode }
 export type FillBlankAnswerState = AnswerState & { answer_history: string[] }
 type ExerciseSessionBase = {
   session_id: string
@@ -104,7 +108,7 @@ export type ExerciseSessionSnapshot = ExerciseSessionBase & (
   }
   | {
     type_code: 'fill_blanks'
-    content: { items: Array<{ id: string; parts: Array<{ kind: 'text'; text: string } | { kind: 'blank'; id: string; hint: string | null } | { kind: 'blank_group'; blanks: Array<{ id: string; word_count: number }> }> }>; rule_hints: Record<string, RuleHint> }
+    content: { items: Array<{ id: string; parts: Array<{ kind: 'text'; text: string } | { kind: 'blank'; id: string; hint: string | null } | { kind: 'blank_group'; blanks: Array<{ id: string; word_count: number }>; hint?: string | null }> }>; rule_hints: Record<string, RuleHint> }
     progress: { blanks: Record<string, FillBlankAnswerState> }
   }
 )
@@ -406,6 +410,7 @@ export class ApiService {
   static createAdminExercise(payload: Omit<ExerciseRecord, 'id'>): Promise<ExerciseRecord> { return this.adminRequest<ExerciseRecord>(API_ENDPOINTS.adminExercises, { method: 'POST', body: JSON.stringify(payload) }, 'Не удалось создать упражнение') }
   static updateAdminExercise(id: number, payload: Omit<ExerciseRecord, 'id' | 'slug' | 'type_code' | 'schema_version'>): Promise<ExerciseRecord> { return this.adminRequest<ExerciseRecord>(`${API_ENDPOINTS.adminExercises}/${id}`, { method: 'PUT', body: JSON.stringify(payload) }, 'Не удалось сохранить упражнение') }
   static async getExercises(): Promise<ExerciseCatalogGroup[]> { return this.adminRequest<ExerciseCatalogGroup[]>(API_ENDPOINTS.exercises, { method: 'GET' }, 'Не удалось загрузить каталог') }
+  static getLearnerRule(ruleId: number): Promise<LearnerRuleResponse> { return this.learnerRequest<LearnerRuleResponse>(`${API_ENDPOINTS.rules}/${ruleId}`, { method: 'GET' }, 'Не удалось загрузить правило') }
   static async getExerciseContent(slug: string): Promise<ExerciseContent> { return this.adminRequest<ExerciseContent>(`${API_ENDPOINTS.exercises}${slug}/content`, { method: 'GET' }, 'Не удалось загрузить упражнение') }
   static createExerciseSession(slug: string): Promise<ExerciseSessionSnapshot> { return this.learnerRequest(`${API_ENDPOINTS.exercises}${slug}/sessions`, { method: 'POST' }, 'Не удалось начать упражнение') }
   static getExerciseSession(slug: string, sessionId: string): Promise<ExerciseSessionSnapshot> { return this.learnerRequest(`${API_ENDPOINTS.exercises}${slug}/sessions/${encodeURIComponent(sessionId)}`, { method: 'GET' }, 'Не удалось восстановить упражнение') }
