@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 
 from services import migrations
-from routers import users, nouns, pronouns, verbs, misc, tests
+from routers import users, nouns, pronouns, verbs, misc, tests, rules
 from routers.admin import main as admin
 from routers.exercises import main as exercises
 
@@ -50,6 +50,7 @@ app.include_router(tests.router)
 app.include_router(misc.router)
 app.include_router(exercises.router)
 app.include_router(exercises.session_router)
+app.include_router(rules.router)
 app.include_router(admin.router)
 
 if __name__ == "__main__":

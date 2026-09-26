@@ -24,6 +24,7 @@ function TreeNode({ root, node, depth, selectedId, expandedIds, onSelect, onTogg
         ) : <span className="inline-block w-8 text-center text-gray-500" aria-hidden="true">•</span>}
         <button
           type="button"
+          data-rule-tree-id={node.id}
           onClick={() => onSelect(node.id)}
           className={`min-h-9 flex-1 rounded px-2 py-2 text-left text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 ${selectedId === node.id ? 'bg-indigo-600 text-white' : 'text-gray-800'}`}
         >

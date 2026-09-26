@@ -1,11 +1,12 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { RuleFields, RuleDraft, validateRuleDraft } from './RuleFields'
+import { RuleFields, RuleDraft, ruleServerFieldErrors, validateRuleDraft } from './RuleFields'
 import { ancestorIds, findRule, RuleTree, subtreeIds } from './RuleTree'
 import { ApiService, RuleNode } from '@/lib/api'
+import { RichRuleEditorHandle } from './RichRuleEditor'
 
 type PendingAction =
   | { type: 'select', id: number }
@@ -41,6 +42,9 @@ export function RuleEditor({ rootId }: RuleEditorProps) {
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
+  const [treeFocusId, setTreeFocusId] = useState<number | null>(null)
+  const [editorSessionVersion, setEditorSessionVersion] = useState(0)
+  const richEditorRef = useRef<RichRuleEditorHandle>(null)
 
   const root = forest.find((node) => node.id === rootId) ?? null
   const selected = root ? findRule([root], selectedId) : null
@@ -56,6 +60,7 @@ export function RuleEditor({ rootId }: RuleEditorProps) {
     setSavedDraft(nextDraft)
     setActionError(null)
     setFieldErrors({})
+    setEditorSessionVersion((current) => current + 1)
     const path = ancestorIds(nextForest, id) ?? []
     setExpandedIds((current) => new Set([...Array.from(current), ...path]))
   }
@@ -66,6 +71,7 @@ export function RuleEditor({ rootId }: RuleEditorProps) {
     try {
       const nextForest = await ApiService.getAdminRules()
       setForest(nextForest)
+      setEditorSessionVersion((current) => current + 1)
       const nextRoot = nextForest.find((node) => node.id === rootId)
       if (initial && nextRoot) {
         setExpandedIds(new Set(allExpandableIds(nextRoot)))
@@ -84,10 +90,18 @@ export function RuleEditor({ rootId }: RuleEditorProps) {
     window.addEventListener('beforeunload', warnBeforeUnload)
     return () => window.removeEventListener('beforeunload', warnBeforeUnload)
   }, [isDirty])
+  useEffect(() => {
+    if (treeFocusId === null) return
+    document.querySelector<HTMLButtonElement>(`[data-rule-tree-id="${treeFocusId}"]`)?.focus()
+    setTreeFocusId(null)
+  }, [expandedIds, selectedId, treeFocusId])
 
   const applyAction = (action: PendingAction, nextForest = forest) => {
     setPendingAction(null)
-    if (action.type === 'select') selectInForest(action.id, nextForest)
+    if (action.type === 'select') {
+      selectInForest(action.id, nextForest)
+      setTreeFocusId(action.id)
+    }
     if (action.type === 'create') {
       const nextDraft = emptyDraft(action.parentId)
       setEditingId(null)
@@ -95,6 +109,7 @@ export function RuleEditor({ rootId }: RuleEditorProps) {
       setSavedDraft(nextDraft)
       setActionError(null)
       setFieldErrors({})
+      setEditorSessionVersion((current) => current + 1)
       const path = ancestorIds(nextForest, action.parentId) ?? []
       setExpandedIds((current) => new Set([...Array.from(current), ...path]))
     }
@@ -108,6 +123,7 @@ export function RuleEditor({ rootId }: RuleEditorProps) {
 
   const refreshAfterMutation = async (changedId: number, created: boolean) => {
     const nextForest = await ApiService.getAdminRules()
+    setEditorSessionVersion((current) => current + 1)
     const destinationRootId = rootIdFor(nextForest, changedId)
     if (destinationRootId === null) {
       router.replace('/admin/rules')
@@ -128,7 +144,10 @@ export function RuleEditor({ rootId }: RuleEditorProps) {
   }
 
   const save = async (): Promise<boolean> => {
-    const errors = validateRuleDraft(draft)
+    const preparedDescription = richEditorRef.current?.prepareForSave() ?? draft.description
+    const preparedDraft = { ...draft, description: preparedDescription }
+    setDraft(preparedDraft)
+    const errors = validateRuleDraft(preparedDraft)
     setFieldErrors(errors)
     if (Object.keys(errors).length) {
       setActionError(Object.values(errors)[0] ?? 'Проверьте обязательные поля.')
@@ -138,7 +157,7 @@ export function RuleEditor({ rootId }: RuleEditorProps) {
       setActionError(null)
     setNotice(null)
     try {
-      const payload = { ...draft, title: draft.title.trim(), description: draft.description.trim() }
+      const payload = { ...preparedDraft, title: preparedDraft.title.trim(), description: preparedDraft.description.trim() }
       const changed = editingId === null
         ? await ApiService.createAdminRule(payload)
         : await ApiService.updateAdminRule(editingId, payload)
@@ -148,6 +167,8 @@ export function RuleEditor({ rootId }: RuleEditorProps) {
       setNotice(editingId === null ? 'Подправило создано.' : 'Изменения сохранены.')
       return true
     } catch (error) {
+      const serverErrors = ruleServerFieldErrors(error)
+      if (Object.keys(serverErrors).length) setFieldErrors(serverErrors)
       setActionError(error instanceof Error ? error.message : 'Не удалось сохранить изменения. Введённые данные сохранены в форме.')
       return false
     } finally { setSaving(false) }
@@ -200,7 +221,7 @@ export function RuleEditor({ rootId }: RuleEditorProps) {
     {actionError && <p role="alert" className="mt-5 rounded-md bg-red-50 p-3 text-red-800">{actionError}</p>}
     <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,0.9fr)]">
       <section aria-label="Дерево правил" className="rounded-lg bg-white p-4 shadow-sm"><div className="mb-3 flex items-center justify-between"><h2 className="font-semibold text-gray-900">Дерево</h2><button type="button" onClick={() => requestAction({ type: 'create', parentId: selectedId })} className="rounded px-2 py-1 text-sm font-medium text-indigo-700 hover:bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-500">+ Добавить подправило</button></div><RuleTree root={root} selectedId={selectedId} expandedIds={expandedIds} onSelect={(id) => requestAction({ type: 'select', id })} onToggle={(id) => setExpandedIds((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })} onAddChild={(id) => requestAction({ type: 'create', parentId: id })} /></section>
-      <section aria-label="Свойства правила" className="rounded-lg bg-white p-5 shadow-sm"><h2 className="text-lg font-semibold text-gray-900">{editingId === null ? 'Новое подправило' : 'Свойства правила'}</h2><form className="mt-5" onSubmit={(event) => { event.preventDefault(); void save() }}><RuleFields forest={forest} value={draft} onChange={(nextDraft) => { setDraft(nextDraft); setFieldErrors({}) }} excludedIds={excludedIds} errors={fieldErrors} /><div className="mt-7 flex flex-wrap gap-3"><button type="submit" disabled={saving} className="rounded-md bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50">{saving ? 'Сохранение…' : 'Сохранить'}</button>{editingId !== null && <button type="button" disabled={deleting} onClick={() => void deleteSelected()} className="rounded-md bg-red-600 px-4 py-2 font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-50">Удалить</button>}</div></form></section>
+      <section aria-label="Свойства правила" className="rounded-lg bg-white p-5 shadow-sm"><h2 className="text-lg font-semibold text-gray-900">{editingId === null ? 'Новое подправило' : 'Свойства правила'}</h2><form className="mt-5" onSubmit={(event) => { event.preventDefault(); void save() }}><RuleFields forest={forest} value={draft} onChange={(nextDraft) => { setDraft(nextDraft); setFieldErrors({}) }} excludedIds={excludedIds} errors={fieldErrors} editorRef={richEditorRef} editorSessionKey={`editor-${editorSessionVersion}`} /><div className="mt-7 flex flex-wrap gap-3"><button type="submit" disabled={saving} className="rounded-md bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50">{saving ? 'Сохранение…' : 'Сохранить'}</button>{editingId !== null && <button type="button" disabled={deleting} onClick={() => void deleteSelected()} className="rounded-md bg-red-600 px-4 py-2 font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-50">Удалить</button>}</div></form></section>
     </div>
     {pendingAction && <div role="dialog" aria-modal="true" aria-labelledby="unsaved-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"><div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl"><h2 id="unsaved-title" className="text-lg font-semibold text-gray-900">Есть несохранённые изменения</h2><p className="mt-2 text-gray-600">Сохранить их перед переходом?</p><div className="mt-6 flex flex-wrap gap-3"><button type="button" onClick={() => void saveAndContinue()} disabled={saving} className="rounded-md bg-indigo-600 px-4 py-2 font-medium text-white focus:outline-none focus:ring-2 focus:ring-indigo-500">Сохранить</button><button type="button" onClick={() => applyAction(pendingAction)} className="rounded-md bg-gray-200 px-4 py-2 font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500">Не сохранять</button><button type="button" onClick={() => setPendingAction(null)} className="rounded-md px-4 py-2 font-medium text-gray-700 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">Остаться</button></div></div></div>}
   </>

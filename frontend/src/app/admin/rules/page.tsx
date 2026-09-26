@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 import { LoadingSpinner, PageLayout, Typography } from '@/components'
 import { ApiService, RuleNode } from '@/lib/api'
+import { RuleDescriptionPreview } from '@/components/rules'
 
 function countRules(nodes: RuleNode[]): number {
   return nodes.reduce((total, node) => total + 1 + countRules(node.children), 0)
@@ -84,7 +85,7 @@ export default function AdminRulesPage() {
                     <h2 className="min-w-0 truncate font-semibold text-gray-900">{rule.title}</h2>
                     <p className="whitespace-nowrap text-sm text-gray-500">Подправил: {rule.children.length}</p>
                   </div>
-                  <p className="mt-1 truncate text-sm text-gray-500">{rule.description}</p>
+                  <p className="mt-1 truncate text-sm text-gray-500"><RuleDescriptionPreview html={rule.description} /></p>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Link href={`/admin/rules/${rule.id}`} className="rounded-md bg-gray-200 px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500">Редактировать</Link>

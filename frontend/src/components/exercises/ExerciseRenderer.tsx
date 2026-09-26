@@ -1,8 +1,10 @@
 'use client'
 
 import { type ReactNode, useId, useRef, useState } from 'react'
+import Link from 'next/link'
 import { Button, Input } from '@/components'
-import { AnswerState, ExerciseSessionAction, ExerciseSessionSnapshot, FillBlankAnswerState, RuleHint } from '@/lib/api'
+import { AnswerState, ExerciseSessionAction, ExerciseSessionSnapshot, FillBlankAnswerState, RuleHint, RuleHintNode } from '@/lib/api'
+import { RuleDescription } from '@/components/rules'
 
 type RendererProps = { exercise: ExerciseSessionSnapshot; onAction: (action: ExerciseSessionAction) => Promise<void> }
 type TypeRendererProps<T extends ExerciseSessionSnapshot['type_code']> = {
@@ -70,17 +72,19 @@ function attemptDotStates(state: AnswerState): AttemptDotState[] {
 }
 
 type PopoverTriggerAttributes = {
-  ariaDescribedBy: string
   ariaControls: string
   ariaExpanded: boolean
+  ariaHasPopup: 'dialog'
 }
 
 function HoverFocusPopover({
   content,
   children,
+  label = 'Дополнительная информация',
 }: {
   content: ReactNode
   children: (attributes: PopoverTriggerAttributes) => ReactNode
+  label?: string
 }) {
   const contentId = useId()
   const wrapperRef = useRef<HTMLSpanElement>(null)
@@ -138,34 +142,36 @@ function HoverFocusPopover({
       }
     }}
   >
-    {children({ ariaDescribedBy: contentId, ariaControls: contentId, ariaExpanded: open })}
+    {children({ ariaControls: contentId, ariaExpanded: open, ariaHasPopup: 'dialog' })}
     {open && <span
       id={contentId}
-      role="tooltip"
+      role="dialog"
+      aria-label={label}
       tabIndex={-1}
-      className="absolute left-0 top-full z-20 mt-2 max-h-80 w-max max-w-[min(32rem,calc(100vw-2rem))] overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 text-sm leading-5 text-slate-800 shadow-lg"
+      className="absolute left-0 top-full z-20 mt-2 min-w-0 max-h-80 w-max max-w-[min(32rem,calc(100vw_-_2rem))] overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 text-sm leading-5 text-slate-800 shadow-lg"
     >
       {content}
     </span>}
   </span>
 }
 
-function RuleHintTree({ hint }: { hint: RuleHint }) {
-  return <div>
+function RuleHintTree({ hint }: { hint: RuleHintNode }) {
+  return <div className="min-w-0">
     <p className="font-semibold text-slate-950">{hint.title}</p>
-    <p className="mt-1 whitespace-pre-wrap text-slate-700">{hint.description}</p>
-    {hint.children.length > 0 && <ul className="mt-2 space-y-2 border-l border-slate-200 pl-3">
+    <RuleDescription html={hint.description} compact className="mt-1" />
+    {hint.children.length > 0 && <ul className="mt-2 min-w-0 space-y-2 border-l border-slate-200 pl-3">
       {hint.children.map((child, index) => <li key={`${child.title}-${index}`}><RuleHintTree hint={child} /></li>)}
     </ul>}
   </div>
 }
 
 function RuleHintContent({ hints }: { hints: Array<{ blankNumber: number; hint: RuleHint }> }) {
-  if (hints.length === 1) return <RuleHintTree hint={hints[0].hint} />
-  return <div className="space-y-4">
-    {hints.map(({ blankNumber, hint }) => <section key={blankNumber}>
+  const treeWithLink = (hint: RuleHint) => <><RuleHintTree hint={hint} /><Link href={`/rules/${hint.root_rule_id}`} className="mt-3 flex min-h-10 items-center font-medium text-indigo-700 underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Открыть правило</Link></>
+  if (hints.length === 1) return treeWithLink(hints[0].hint)
+  return <div className="min-w-0 space-y-4">
+    {hints.map(({ blankNumber, hint }) => <section key={blankNumber} className="min-w-0">
       <p className="mb-2 font-semibold text-slate-950">Пропуск {blankNumber}</p>
-      <RuleHintTree hint={hint} />
+      {treeWithLink(hint)}
     </section>)}
   </div>
 }
@@ -177,14 +183,14 @@ function AttemptDots({ blankId, blankNumber, state }: { blankId: string; blankNu
     green: 'bg-green-500',
   }
 
-  return <HoverFocusPopover content={<div className="min-w-52"><p className="font-semibold text-slate-950">История ответов</p>{state.answer_history.length > 0 ? <ol className="mt-2 list-decimal space-y-1 pl-5">{state.answer_history.map((answer, index) => <li key={index} className="whitespace-pre-wrap">{answer}</li>)}</ol> : <p className="mt-2 text-slate-700">Пока нет проверенных ответов</p>}</div>}>
-    {({ ariaDescribedBy, ariaControls, ariaExpanded }) => <button
+  return <HoverFocusPopover label="История ответов" content={<div className="min-w-52"><p className="font-semibold text-slate-950">История ответов</p>{state.answer_history.length > 0 ? <ol className="mt-2 list-decimal space-y-1 pl-5">{state.answer_history.map((answer, index) => <li key={index} className="whitespace-pre-wrap">{answer}</li>)}</ol> : <p className="mt-2 text-slate-700">Пока нет проверенных ответов</p>}</div>}>
+    {({ ariaControls, ariaExpanded, ariaHasPopup }) => <button
       type="button"
       data-blank-id={blankId}
       aria-label={`История ответов для пропуска ${blankNumber}`}
-      aria-describedby={ariaDescribedBy}
       aria-controls={ariaControls}
       aria-expanded={ariaExpanded}
+      aria-haspopup={ariaHasPopup}
       className="flex h-11 w-8 shrink-0 flex-col items-center justify-center gap-1 rounded-md outline-none transition focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
     >
       <span className="flex flex-col gap-1" aria-hidden="true">
@@ -268,6 +274,7 @@ function FillBlanks({ exercise, onAction }: TypeRendererProps<'fill_blanks'>) {
               : states.some(state => state.status === 'exhausted') && closed
                 ? 'border-red-400 bg-red-50 text-red-900 disabled:border-red-400 disabled:bg-red-50 disabled:text-red-900'
                 : 'border-gray-300 bg-white disabled:bg-gray-100'
+            const hintId = `hint-${part.blanks.map(blank => blank.id).join('-')}`
             const statusIds = blankIds.map(blankId => `status-${blankId}`)
             const closedRuleHints = blankIds
               .filter(blankId => progress.blanks[blankId].status !== 'open')
@@ -275,9 +282,10 @@ function FillBlanks({ exercise, onAction }: TypeRendererProps<'fill_blanks'>) {
               .filter((entry): entry is { blankNumber: number; hint: RuleHint } => Boolean(entry.hint))
             const input = (attributes?: PopoverTriggerAttributes) => <input
               aria-label={`Ответ для задания ${itemIndex + 1}, объединённые пропуски ${blankIds.map(blankId => blankNumbers[blankId]).join(', ')}`}
-              aria-describedby={[...statusIds, attributes?.ariaDescribedBy].filter(Boolean).join(' ')}
+              aria-describedby={[part.hint ? hintId : null, ...statusIds].filter(Boolean).join(' ')}
               aria-controls={attributes?.ariaControls}
               aria-expanded={attributes?.ariaExpanded}
+              aria-haspopup={attributes?.ariaHasPopup}
               className={`h-11 w-[clamp(9rem,18vw,17.5rem)] max-w-full rounded-lg border px-3 text-base leading-normal shadow-sm outline-none transition focus:border-indigo-600 focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed ${stateClass}`}
               value={inputValue}
               readOnly={closed}
@@ -288,8 +296,9 @@ function FillBlanks({ exercise, onAction }: TypeRendererProps<'fill_blanks'>) {
               placeholder="Твой ответ..."
             />
             return <span className="inline-flex max-w-full flex-wrap items-center gap-2 align-middle" key={key}>
-              {closedRuleHints.length > 0 ? <HoverFocusPopover content={<RuleHintContent hints={closedRuleHints} />}>{attributes => input(attributes)}</HoverFocusPopover> : input()}
+              {closedRuleHints.length > 0 ? <HoverFocusPopover label="Подсказка правила" content={<RuleHintContent hints={closedRuleHints} />}>{attributes => input(attributes)}</HoverFocusPopover> : input()}
               {blankIds.map(blankId => <AttemptDots blankId={blankId} blankNumber={blankNumbers[blankId]} state={progress.blanks[blankId]} key={blankId} />)}
+              {part.hint && <span id={hintId} className="text-base italic leading-6 text-slate-500">({part.hint})</span>}
               {blankIds.map(blankId => <span id={`status-${blankId}`} className="sr-only" aria-live="polite" key={`status-${blankId}`}>{statusText(progress.blanks[blankId], blankId)}</span>)}
             </span>
           }
@@ -310,9 +319,10 @@ function FillBlanks({ exercise, onAction }: TypeRendererProps<'fill_blanks'>) {
 
           const input = (attributes?: PopoverTriggerAttributes) => <input
               aria-label={`Ответ для задания ${itemIndex + 1}`}
-              aria-describedby={[part.hint ? hintId : null, statusId, attributes?.ariaDescribedBy].filter(Boolean).join(' ')}
+              aria-describedby={[part.hint ? hintId : null, statusId].filter(Boolean).join(' ')}
               aria-controls={attributes?.ariaControls}
               aria-expanded={attributes?.ariaExpanded}
+              aria-haspopup={attributes?.ariaHasPopup}
               className={`h-11 w-[clamp(9rem,18vw,17.5rem)] max-w-full rounded-lg border px-3 text-base leading-normal shadow-sm outline-none transition focus:border-indigo-600 focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed ${stateClass}`}
               value={displayedValue}
               readOnly={closed}
@@ -323,7 +333,7 @@ function FillBlanks({ exercise, onAction }: TypeRendererProps<'fill_blanks'>) {
               placeholder="Твой ответ..."
             />
           return <span className="inline-flex max-w-full items-center gap-2 whitespace-nowrap align-middle" key={part.id}>
-            {closed && ruleHints[part.id] ? <HoverFocusPopover content={<RuleHintContent hints={[{ blankNumber: blankNumbers[part.id], hint: ruleHints[part.id] }]} />}>{attributes => input(attributes)}</HoverFocusPopover> : input()}
+            {closed && ruleHints[part.id] ? <HoverFocusPopover label="Подсказка правила" content={<RuleHintContent hints={[{ blankNumber: blankNumbers[part.id], hint: ruleHints[part.id] }]} />}>{attributes => input(attributes)}</HoverFocusPopover> : input()}
             <AttemptDots blankId={part.id} blankNumber={blankNumbers[part.id]} state={state} />
             {part.hint && <span id={hintId} className="text-base italic leading-6 text-slate-500">({part.hint})</span>}
             <span id={statusId} className="sr-only" aria-live="polite">{statusText(state, part.id)}</span>

@@ -1,12 +1,13 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { LoadingSpinner, PageLayout, Typography } from '@/components'
-import { RuleFields, RuleDraft, validateRuleDraft } from '@/components/admin/RuleFields'
+import { RuleFields, RuleDraft, ruleServerFieldErrors, validateRuleDraft } from '@/components/admin/RuleFields'
 import { findRule } from '@/components/admin/RuleTree'
 import { ApiService, RuleNode } from '@/lib/api'
 import { useRouter } from 'next/navigation'
+import { RichRuleEditorHandle } from '@/components/admin/RichRuleEditor'
 
 const emptyDraft: RuleDraft = { title: '', description: '', parent_rule_id: null }
 
@@ -19,6 +20,7 @@ export default function NewAdminRulePage() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const richEditorRef = useRef<RichRuleEditorHandle>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -31,13 +33,15 @@ export default function NewAdminRulePage() {
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
-    const nextErrors = validateRuleDraft(draft)
+    const preparedDraft = { ...draft, description: richEditorRef.current?.prepareForSave() ?? draft.description }
+    setDraft(preparedDraft)
+    const nextErrors = validateRuleDraft(preparedDraft)
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length) return
     setSaving(true)
     setSaveError(null)
     try {
-      const created = await ApiService.createAdminRule({ ...draft, title: draft.title.trim(), description: draft.description.trim() })
+      const created = await ApiService.createAdminRule({ ...preparedDraft, title: preparedDraft.title.trim(), description: preparedDraft.description.trim() })
       if (created.parent_rule_id === null) {
         router.replace(`/admin/rules/${created.id}`)
         return
@@ -48,6 +52,8 @@ export default function NewAdminRulePage() {
       const root = parent ? refreshed.find((node) => findRule([node], parent.id)) : null
       router.replace(`/admin/rules/${root?.id ?? created.id}`)
     } catch (error) {
+      const serverErrors = ruleServerFieldErrors(error)
+      if (Object.keys(serverErrors).length) setErrors(serverErrors)
       setSaveError(error instanceof Error ? error.message : 'Не удалось сохранить правило.')
     } finally { setSaving(false) }
   }
@@ -58,7 +64,7 @@ export default function NewAdminRulePage() {
     {loading ? <div className="flex justify-center py-16"><LoadingSpinner size="lg" /></div> : loadError ? <div role="alert" className="mt-6 rounded-md border border-red-200 bg-red-50 p-4 text-red-800"><p>{loadError}</p><button type="button" onClick={() => void load()} className="mt-2 underline">Повторить</button></div> :
       <form onSubmit={(event) => void submit(event)} className="mt-6 rounded-lg bg-white p-6 shadow-sm">
         {saveError && <p role="alert" className="mb-4 rounded bg-red-50 p-3 text-red-800">{saveError}</p>}
-        <RuleFields forest={forest} value={draft} onChange={setDraft} errors={errors} />
+        <RuleFields forest={forest} value={draft} onChange={setDraft} errors={errors} editorRef={richEditorRef} editorSessionKey="new-root" />
         <div className="mt-7 flex flex-wrap gap-3"><button type="submit" disabled={saving} className="rounded-md bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50">{saving ? 'Сохранение…' : 'Создать правило'}</button><Link href="/admin/rules" className="rounded-md bg-gray-200 px-4 py-2 font-medium text-gray-800 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500">Отмена</Link></div>
       </form>}
   </div></PageLayout>

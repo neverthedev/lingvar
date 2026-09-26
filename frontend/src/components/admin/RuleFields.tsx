@@ -1,7 +1,8 @@
 'use client'
 
-import { Fragment } from 'react'
-import { RuleNode, RulePayload } from '@/lib/api'
+import { Fragment, RefObject } from 'react'
+import { ApiRequestError, RuleNode, RulePayload } from '@/lib/api'
+import { RichRuleEditor, RichRuleEditorHandle } from './RichRuleEditor'
 
 export type RuleDraft = RulePayload
 
@@ -11,6 +12,8 @@ interface RuleFieldsProps {
   onChange: (nextValue: RuleDraft) => void
   excludedIds?: Set<number>
   errors?: Partial<Record<'title' | 'description', string>>
+  editorRef?: RefObject<RichRuleEditorHandle>
+  editorSessionKey?: string
 }
 
 function ParentOptions({ nodes, depth, excludedIds }: { nodes: RuleNode[], depth: number, excludedIds: Set<number> }) {
@@ -26,7 +29,7 @@ function ParentOptions({ nodes, depth, excludedIds }: { nodes: RuleNode[], depth
   </>
 }
 
-export function RuleFields({ forest, value, onChange, excludedIds = new Set(), errors = {} }: RuleFieldsProps) {
+export function RuleFields({ forest, value, onChange, excludedIds = new Set(), errors = {}, editorRef, editorSessionKey = 'new-rule' }: RuleFieldsProps) {
   return (
     <div className="space-y-5">
       <div>
@@ -44,16 +47,7 @@ export function RuleFields({ forest, value, onChange, excludedIds = new Set(), e
       </div>
       <div>
         <label htmlFor="rule-description" className="block text-sm font-medium text-gray-800">Описание *</label>
-        <textarea
-          id="rule-description"
-          rows={7}
-          value={value.description}
-          onChange={(event) => onChange({ ...value, description: event.target.value })}
-          aria-invalid={Boolean(errors.description)}
-          aria-describedby={errors.description ? 'rule-description-error' : undefined}
-          className="mt-1 block w-full resize-y rounded-md border border-gray-300 px-3 py-2 text-gray-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-        />
-        {errors.description && <p id="rule-description-error" className="mt-1 text-sm text-red-700">{errors.description}</p>}
+        <RichRuleEditor key={editorSessionKey} ref={editorRef} value={value.description} onChange={(description) => onChange({ ...value, description })} error={errors.description} />
       </div>
       <div>
         <label htmlFor="rule-parent" className="block text-sm font-medium text-gray-800">Родительское правило</label>
@@ -75,6 +69,18 @@ export function validateRuleDraft(value: RuleDraft): Partial<Record<'title' | 'd
   const errors: Partial<Record<'title' | 'description', string>> = {}
   if (!value.title.trim()) errors.title = 'Введите название правила.'
   if (value.title.trim().length > 200) errors.title = 'Название должно содержать не более 200 символов.'
-  if (!value.description.trim()) errors.description = 'Введите описание правила.'
+  if (!value.description.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim()) errors.description = 'Введите описание правила.'
   return errors
+}
+
+export function ruleServerFieldErrors(error: unknown): Partial<Record<'title' | 'description', string>> {
+  if (!(error instanceof ApiRequestError)) return {}
+  const result: Partial<Record<'title' | 'description', string>> = {}
+  for (const issue of error.issues) {
+    const field = issue.loc?.at(-1)
+    if ((field === 'title' || field === 'description') && !result[field]) {
+      result[field] = issue.msg.replace(/^Value error,\s*/, '')
+    }
+  }
+  return result
 }
